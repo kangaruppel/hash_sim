@@ -37,9 +37,11 @@ int main(int argc, char *argv[])
 	scanf("%i %i %i %f", &num_requests,&namespace_size,&rep_factor, &write_probability);
 	printf("%i %i %i %f\n", num_requests, namespace_size, rep_factor, write_probability);
 	on_mat_file=fopen(argv[1],"r");
+	i=0;
 	//Get num_nodes --> width of input array
 	while(1)
 	{	fscanf(on_mat_file,"%c", &test);
+		printf("%c",test);
 		i++;
 		if(test=='\n')
 		{	num_nodes=i/2;
@@ -49,7 +51,7 @@ int main(int argc, char *argv[])
 	printf("num_nodes=%i\n",num_nodes);
 	//Get number of time_outsteps -->length on input array
 	while((test=fgetc(on_mat_file))!=EOF)
-	{	 
+	{	 //printf("%c",test);
 		if(test=='\n')
 			time_outsteps++;
 	}

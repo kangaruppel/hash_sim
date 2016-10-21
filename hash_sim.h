@@ -7,6 +7,8 @@ typedef struct data_{
 	int owner;
 	int rep_factor;
 	int invalid_accesses;
+	int num_writers;
+	int *writers;
 	int *copyholders;
 	int *valid_copies;
 	int *invalid_time_start;
