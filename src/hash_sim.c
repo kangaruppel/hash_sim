@@ -94,7 +94,10 @@ int make_data(data *input, int ID, int num_nodes, int rep_factor)
 	input->owner=ID % num_nodes; 
 	input->rep_factor=rep_factor;
 	input->invalid_accesses=0;
+	input->num_writers=1;
 	input->copyholders=copyfinder(num_nodes,rep_factor,input->owner);
+	input->writers=malloc(sizeof(int));
+	input->writers[0]=input->owner;
 	input->valid_copies=malloc(sizeof(int)*rep_factor);
 	input->invalid_time_start=malloc(sizeof(int)*rep_factor);
 	input->invalid_time_total=malloc(sizeof(int)*rep_factor);
@@ -113,6 +116,7 @@ int free_data(data *data_in)
 	free(data_in->valid_copies);
 	free(data_in->invalid_time_start);
 	free(data_in->invalid_time_total);
+	free(data_in->writers);
 	return 0; 
 }
 int *copyfinder(int num_nodes, int rep_factor, int owner)
@@ -284,8 +288,12 @@ long process_requests(int **on_mat,node *nodes, data *data_arr, int num_nodes, i
 		{	j=nodes_on[num_tried]; //pick a random start point, also shouldn't have to worry about cleaning out this array every time...
 			total_time=0;
 			//num_tried++;
+			if(!(nodes+j)->Queue)
+			{	num_tried++;
+				continue;
+			}
 			printf("j=%i\n",j);
-			if((nodes+j)->Queue && on_mat[i][j])
+			if( on_mat[i][j])
 			{	//printf("Checking node %i\n",j);
 				on=1;
 				num_tried++;
@@ -307,7 +315,7 @@ long process_requests(int **on_mat,node *nodes, data *data_arr, int num_nodes, i
 		}
 		if(num_on>0)
 			printf("Tried all nodes\n");
-		/*if(on)
+		if(on)
 		{	summed=0;
 			for(k=0;k<num_nodes;k++)
 			{	printf("%i ",on_mat[i][k]);
@@ -322,7 +330,7 @@ long process_requests(int **on_mat,node *nodes, data *data_arr, int num_nodes, i
 				}
 			}
 			on=0;
-		}*/
+		}
 		done=all_queues_empty(nodes,num_nodes);
 		intermed=staleness_checker(data_arr,stale_vector,namespace_size); 
 		stale_timelog[time_to_finish]=intermed;
@@ -355,6 +363,7 @@ long process_requests(int **on_mat,node *nodes, data *data_arr, int num_nodes, i
 	free(avail_row);
 	free(stale_vector);
 	free(stale_timelog);
+	free(nodes_on);
 	return time_to_finish;
 		
 }
@@ -367,11 +376,11 @@ float read_off_queue(int j, data *data_arr, node *nodes, int *on_row, double  gl
 		return 1; 
 	message *new_packet, *test_packet;
 	data *dummy;
-	int ID=packet->content->ID, rep_factor=packet->content->rep_factor;
+	int ID=packet->content->ID, rep_factor=packet->content->rep_factor, writer=0;
 	int *copyholders=malloc(sizeof(int)*packet->content->rep_factor);
 	int owner=packet->content->owner;
 	int *avail_row=malloc(sizeof(int)*num_nodes);
-	int i, flag=1, sum_valid=0, extra;
+	int i,k, flag=1, sum_valid=0, extra;
 	float time=0; 
 	for(i=0;i<packet->content->rep_factor-1;i++)
 		copyholders[i]=packet->content->copyholders[i];
@@ -379,7 +388,22 @@ float read_off_queue(int j, data *data_arr, node *nodes, int *on_row, double  gl
 		avail_row[i]=on_row[i];
 	switch(packet->message_type)
 	{	case 0: //Schedule a write
-			if(owner==j) //it's local & we have write permission!
+			//Check if it's a writer already.
+			for(k=0;k<packet->content->num_writers;k++)
+			{	if(j==packet->content->writers[k])
+				{	writer=1;
+					break;	
+				}
+			}
+			//Check if we can make it a writer, and do so if allowed
+			if(packet->content->num_writers<WRITER_LEVEL)
+			{	packet->content->num_writers++; 	
+				packet->content->writers=realloc(packet->content->writers,packet->content->num_writers);
+				packet->content->writers[packet->content->num_writers-1]=j; 
+				writer=1;
+			}
+			//If the node is allowed to write it... FYI, it'll also get responsibility for updating
+			if(writer)
 			{	time=.01;
 				//remove_query(nodes+j,packet);
 				(nodes+j)->Hits+=1;
@@ -411,7 +435,7 @@ float read_off_queue(int j, data *data_arr, node *nodes, int *on_row, double  gl
 						//avail_row[copyholders[i-1]]=0;
 						on_row[copyholders[i-1]]=0; //<-- replaced line above as a test.... 10-16-16
 						(data_arr+ID)->valid_copies[i]=1;
-						(data_arr+ID)->invalid_time_total[i]=0; //since it was on when the owner first issued a write
+						(data_arr+ID)->invalid_time_total[i]=0; //since it was on when someone first issued a write
 						(data_arr+ID)->invalid_time_start[i]=0; //reset
 					}
 					
@@ -425,17 +449,24 @@ float read_off_queue(int j, data *data_arr, node *nodes, int *on_row, double  gl
 				}
 								
 			}
-			else //need to tell owner to update
+			else //need to tell a writer to update
 			{	if(total_time>0) //don't send anything if not enough time
 				{	free(avail_row);
 					free(copyholders);
 					return 1;
 				}
 				time=1;
-				if(on_row[owner]==1) //owner is on
+				for(k=0;k<packet->content->num_writers;k++)
+				{	if(on_row[packet->content->writers[k]])
+					{	writer=1; //all right, i'm reusing this boolean again, so sue me
+						owner=packet->content->writers[k];
+						break;	
+					}
+				}
+				if(writer) //owner is on
 				{	new_packet=malloc(sizeof(message));
 					make_message(new_packet,0,packet->content,NULL); //need to throw 0 packet on there!!
-					add_query(nodes+owner,new_packet);
+					add_query(nodes+owner,new_packet); //I shouldn't be leaving "owner" here b/c it's not strictly correct...
 					(nodes+j)->Hits+=1;
 					(nodes+j)->Total+=1;
 					(nodes+owner)->Acks++;
@@ -443,8 +474,6 @@ float read_off_queue(int j, data *data_arr, node *nodes, int *on_row, double  gl
 					//avail_row[owner]=0; 
 					on_row[owner]=0;
 					remove_query(nodes+j,packet);
-					
-					
 				}
 				else
 				{	(nodes+j)->Misses++;

@@ -7,6 +7,8 @@ typedef struct data_{
 	int owner;
 	int rep_factor;
 	int invalid_accesses;
+	int num_writers;
+	int *writers;
 	int *copyholders;
 	int *valid_copies;
 	int *invalid_time_start;
@@ -47,3 +49,6 @@ float read_off_queue(int, data *, node *, int *, double, float, int);
 int all_queues_empty(node *, int);
 float staleness_checker(data *, long *, int);
 void shuffle(int *, size_t );
+
+int RETRY_LEVEL;
+int WRITER_LEVEL;

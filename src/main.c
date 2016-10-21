@@ -11,9 +11,25 @@ int main(int argc, char *argv[])
 	char test,junk;
 	int i=0, j=0, test2;
 	long time_out=0; 
+	RETRY_LEVEL=0;
+	WRITER_LEVEL=1;
 	if(argc < 2)
 	{	fprintf(stderr, "Not enough input arguments!", -1);
 		return -1; 
+	}
+	for(i=0;i<argc;i++)
+	{	if(argv[i][0]=='-')
+		{	switch(argv[i][1])
+			{	case 'r': 
+					RETRY_LEVEL=atoi(argv[i+1]);
+					break;
+				case 'w':
+					WRITER_LEVEL=atoi(argv[i+1]);
+					break;				
+			}
+			
+		}
+		
 	}
 	//srand(3658);
 	srand(time(NULL));
@@ -21,9 +37,11 @@ int main(int argc, char *argv[])
 	scanf("%i %i %i %f", &num_requests,&namespace_size,&rep_factor, &write_probability);
 	printf("%i %i %i %f\n", num_requests, namespace_size, rep_factor, write_probability);
 	on_mat_file=fopen(argv[1],"r");
+	i=0;
 	//Get num_nodes --> width of input array
 	while(1)
 	{	fscanf(on_mat_file,"%c", &test);
+		printf("%c",test);
 		i++;
 		if(test=='\n')
 		{	num_nodes=i/2;
@@ -33,7 +51,7 @@ int main(int argc, char *argv[])
 	printf("num_nodes=%i\n",num_nodes);
 	//Get number of time_outsteps -->length on input array
 	while((test=fgetc(on_mat_file))!=EOF)
-	{	 
+	{	 //printf("%c",test);
 		if(test=='\n')
 			time_outsteps++;
 	}
