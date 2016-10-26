@@ -167,7 +167,7 @@ long process_requests(int **on_mat,node *nodes, data *data_arr, int num_nodes, i
 					{	time_out=read_off_queue(j,data_arr,nodes,avail_row,time_to_finish,total_time, num_nodes);
 						avail_row[j]=0;
 						//printf("Avail_row: ");
-					//	for(k=0;k<num_nodes;k++)
+						//	for(k=0;k<num_nodes;k++)
 						//	printf("%i ",avail_row[k]);
 						//printf("\n");
 						total_time+=time_out;
@@ -264,11 +264,18 @@ float read_off_queue(int j, data *data_arr, node *nodes, int *on_row, double  gl
 				packet->content->writers[packet->content->num_writers-1]=j; 
 				writer=1;
 			}*/
-			if(MULTI_WRITER)
+			if(MULTI_WRITER==ALL)
 				writer=1;
-			else if(j==owner)
+			else if(MULTI_WRITER==COPIES)
+				for(i=0;i<rep_factor;i++)
+				{	if(copyholders[i]==j)
+					{	writer=1;
+						break;
+					}
+				}
+			if(j==owner)
 				writer=1;
-			packet->content->num_writers++; //increment number of writers of this data (ever), used for versions
+			//packet->content->num_writers++; //increment number of writers of this data (ever), used for versions
 			//If the node is allowed to write it... FYI, it'll also get responsibility for updating
 			if(writer)
 			{	time=.01;
@@ -332,6 +339,7 @@ float read_off_queue(int j, data *data_arr, node *nodes, int *on_row, double  gl
 					free(copyholders);
 					return 1;
 				}
+				
 				time=1;
 				/*	for(k=0;k<packet->content->num_writers;k++)
 				{	if(on_row[packet->content->writers[k]])
@@ -341,13 +349,19 @@ float read_off_queue(int j, data *data_arr, node *nodes, int *on_row, double  gl
 					}
 				}*/
 				if(on_row[owner]) //owner is on
-				{	new_packet=malloc(sizeof(message));
+				{	new_write_monitoring(owner, nodes,packet->content, global_time);
+					new_packet=malloc(sizeof(message));
 					make_message(new_packet,0,packet->content,NULL); //need to throw 0 packet on there!!
 					add_query(nodes+owner,new_packet); //I shouldn't be leaving "owner" here b/c it's not strictly correct...
+					cur_write=(nodes+owner)->Active_writes;
+					cur_write->copies_acked[0]=1;
+					(data_arr+ID)->valid_copies[0]=cur_write->version;
+					(data_arr+ID)->invalid_time_total[0]=0; //since it was on when someone first issued a write
+					(data_arr+ID)->invalid_time_start[0]=0; //reset
 					(nodes+j)->Hits+=1;
 					(nodes+j)->Total+=1;
 					(nodes+owner)->Acks++;
-					(nodes+owner)->Total++;
+					(nodes+owner)->Total++; 
 					//avail_row[owner]=0; 
 					on_row[owner]=0;
 					remove_query(nodes+j,packet);
@@ -443,7 +457,7 @@ float read_off_queue(int j, data *data_arr, node *nodes, int *on_row, double  gl
 				return 1;
 			}
 			//find correct update in list of active writes on node
-			for(cur_write=(nodes+j)->Active_writes;cur_write, cur_write->ID!=packet->ID;cur_write=cur_write->next);
+			for(cur_write=(nodes+j)->Active_writes;cur_write->next, cur_write->ID!=packet->content->ID;cur_write=cur_write->next);
 			(nodes+j)->Updates++;
 			(nodes+j)->Total++;
 			time=1;

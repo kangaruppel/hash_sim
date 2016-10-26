@@ -4,7 +4,7 @@
 
 int main(int argc, char *argv[])
 {	FILE *on_mat_file;
-	int  num_nodes, num_requests=1000, namespace_size=1000, rep_factor=num_nodes/5, time_outsteps=1;
+	int  num_nodes, num_requests=1000, namespace_size=1000, rep_factor, time_outsteps=1;
 	int hits, misses, updates, acks, total, invalid_accesses;
 	int **on_mat;
 	float write_probability=.25;
@@ -61,6 +61,8 @@ int main(int argc, char *argv[])
 		}
 	}
 	printf("num_nodes=%i\n",num_nodes);
+	if(!rep_factor)
+		rep_factor=num_nodes/5;
 	//Get number of time_outsteps -->length on input array
 	while((test=fgetc(on_mat_file))!=EOF)
 	{	 //printf("%c",test);
