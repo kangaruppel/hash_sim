@@ -1,0 +1,75 @@
+Protocol for Synchronization: 
+
+All Nodes: 
+	Must check for lock on all data before processing every time
+	Should be part of normal local instruction, just can't bypass
+	data if it turns out it's locked (the time was already spent
+	decoding it and such).
+	
+	
+Lock Requestor: 
+	Asks any owner of "x" for a lock
+	Waits for reply...
+		Will get: 
+			"granted" --> lock is ready 
+			"pending" --> still waiting for acks from copyholdersor 
+			"busy"    --> data is already locked
+	Tells any copyholder that the lock is released 
+	(In future, might be worth it to be in charge of telling all copyholders, 
+	depends how hotspots tend to form, around requests or data)
+	
+Lock Owner: 
+	When request recieved, check if "x" is already locked
+		if yes
+			return "busy"
+		else 
+			return "pending"
+			Go try to lock all of the copyholders
+				Once all copyholders "ack", 
+					return "granted"
+
+Copyholder who hears release:
+	Go tell other copies and owner about release (this is blocking... sort of)
+	Serve requests on "x"
+	If lock notification comes in on "x", stop trying to release it. 
+	
+	
+	
+Notes: 
+		All of this relies on the fact that ALL copies have to acknowledge a lock before it
+	gets granted. 
+		The response messages from the lock request CAN'T be inferred by an oracle, the consistency
+	policies will process them. 
+		The emphasis is on the requestor to do something productive with the rejected requests for
+	a lock, the lock owner won't start continuously sending messages to the requestor until it actually
+	grants that lock. 
+		The whole simulator is built on a static input of on/off data, meaning that energy management policies, 
+	such as idling while waiting for lock replies, etc, are going to be lost... so it goes. 
+	
+	
+Optimizations: 
+		All nodes in listening range could forward the lock and release messages a couple of 
+	times.
+		A node's response to waiting for a lock needs to be smart, particularly to avoid deadlock and
+	optimize energy usage, which will affect probability that a node is on to hear a particular response. 
+	
+	
+Motivation for Single Lock Owner, Multiple Lock Releasors: 
+
+Single Lock Owner-
+Assume nodes 0,2,3,4 are copyholders of "x", 1 and 5 are not, any copyholder can take up the lock request.
+1 asks 0 for lock on "x"
+0 returns "pending", gets ack's from 2,3
+5 asks 4 for lock on "x"
+4 returns "pending", and goes looking for acks's but 0 is already  halfway through filling 1's request. 
+Shouldn't be allowed to happen- means wrong status was sent to 1 and 5
+
+Multiple Lock Releasors-
+Assume 0 is "x" owner and 2,3,4 are copyholders, 1 is not a copyholder, but it has a lock on "x". 
+1 releases lock on "x", and 2,3,4 hear, but cannot act on it. 
+Whole system waits until 0 comes up and the same time as 1 to propogate the message. 
+
+1 releases lock on "x", and 2,3,4 hear and can respond. 
+2,3,4 unlock that data
+2 continues propogating the message until 0 hears. 
+	If 0 gets another request for a lock on "x", it will squash 2's release attempts. 

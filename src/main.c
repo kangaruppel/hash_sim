@@ -1,18 +1,18 @@
 #include "hash_sim.h"
 
 
-//So far, we need a bazillion inputs to this... TODO: streamline inputs!
+
 int main(int argc, char *argv[])
 {	FILE *on_mat_file;
-	int  num_nodes, num_requests, namespace_size, rep_factor, time_outsteps=1;
+	int  num_nodes, num_requests=1000, namespace_size=1000, rep_factor=num_nodes/5, time_outsteps=1;
 	int hits, misses, updates, acks, total, invalid_accesses;
 	int **on_mat;
-	float write_probability;
+	float write_probability=.25;
 	char test,junk;
 	int i=0, j=0, test2;
 	long time_out=0; 
 	RETRY_LEVEL=0;
-	WRITER_LEVEL=1;
+	MULTI_WRITER=0;
 	if(argc < 2)
 	{	fprintf(stderr, "Not enough input arguments!", -1);
 		return -1; 
@@ -20,12 +20,24 @@ int main(int argc, char *argv[])
 	for(i=0;i<argc;i++)
 	{	if(argv[i][0]=='-')
 		{	switch(argv[i][1])
-			{	case 'r': 
+			{	case 'r': //retry level
 					RETRY_LEVEL=atoi(argv[i+1]);
 					break;
-				case 'w':
-					WRITER_LEVEL=atoi(argv[i+1]);
-					break;				
+				case 'm': //multi writer
+					MULTI_WRITER=atoi(argv[i+1]);
+					break;	
+				case 'q': //queue size initial
+					num_requests=atoi(argv[i+1]);
+					break;
+				case 'v': //variable number
+					namespace_size=atoi(argv[i+1]);
+					break; 
+				case 'k': //replication factor
+					rep_factor=atoi(argv[i+1]);
+					break; 
+				case 'p': //probability of write
+					write_probability=atoi(argv[i+1]);
+					break; 
 			}
 			
 		}
@@ -33,9 +45,9 @@ int main(int argc, char *argv[])
 	}
 	//srand(3658);
 	srand(time(NULL));
-	printf("Enter number of requests, namespace size, replication factor, and write probability.\n");
-	scanf("%i %i %i %f", &num_requests,&namespace_size,&rep_factor, &write_probability);
-	printf("%i %i %i %f\n", num_requests, namespace_size, rep_factor, write_probability);
+	//printf("Enter number of requests, namespace size, replication factor, and write probability.\n");
+	//scanf("%i %i %i %f", &num_requests,&namespace_size,&rep_factor, &write_probability);
+	//printf("%i %i %i %f\n", num_requests, namespace_size, rep_factor, write_probability);
 	on_mat_file=fopen(argv[1],"r");
 	i=0;
 	//Get num_nodes --> width of input array
