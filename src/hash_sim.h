@@ -2,6 +2,9 @@
 #include <stdlib.h>
 #include <time.h>
 
+#define ALL 1
+#define COPIES 2
+
 typedef struct data_{
 	int ID;
 	int owner;
