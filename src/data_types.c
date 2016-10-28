@@ -210,3 +210,19 @@ int remove_write(node *input,write *remove)
 	free(trash);
 	return 0; 
 }
+
+//This function sets up the new write monitoring node... It has j as and index into the 
+//array, 
+int new_write_monitoring(int j, node *nodes, data *content, double global_time)
+{	write *new=malloc(sizeof(write));
+	(nodes+j)->Hits+=1;
+	(nodes+j)->Total+=1;
+	content->num_writers++; //Basically increment the most up-to-date version number
+	if(!new)
+		return -1;
+	make_write(new,content->ID, content->num_writers, content->rep_factor);
+	add_write(nodes+j, new);
+	content->mod_times=realloc(content->mod_times,sizeof(int)*content->num_writers);
+	content->mod_times[content->num_writers-1]=global_time;
+	return 0; 
+}

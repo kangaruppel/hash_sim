@@ -13,6 +13,7 @@ int main(int argc, char *argv[])
 	long time_out=0; 
 	RETRY_LEVEL=0;
 	MULTI_WRITER=0;
+	FINISH_ALL_UPDATES=1;
 	if(argc < 2)
 	{	fprintf(stderr, "Not enough input arguments!", -1);
 		return -1; 
@@ -38,6 +39,9 @@ int main(int argc, char *argv[])
 				case 'p': //probability of write
 					write_probability=atoi(argv[i+1]);
 					break; 
+				case 'u': //finish all updates or leave if all other requests filled
+					FINISH_ALL_UPDATES=atoi(argv[i+1]);
+					break;
 			}
 			
 		}

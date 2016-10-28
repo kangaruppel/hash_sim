@@ -47,8 +47,17 @@ int all_queues_empty(node *nodes,int num_nodes)
 		//for(cur=(nodes+i)->Queue;cur;cur=cur->next)
 			//printf("%5i %5i %5i \n", cur->content->ID, cur->content->owner, cur->message_type);
 		if((nodes+i)->Queue)
-		{	finished=0;
-			//break;
+		{	if(FINISH_ALL_UPDATES)
+			{	finished=0;
+				break;
+			}
+			else //If the simulation finishes if only update messages are left
+			{	if((nodes+i)->Queue->message_type!=4)
+				{	finished=0;
+					break;
+				}
+			}
+			
 		}	
 	}
 	return finished;
@@ -311,8 +320,8 @@ float read_off_queue(int j, data *data_arr, node *nodes, int *on_row, double  gl
 					{	if(on_row[copyholders[i]] && !cur_write->copies_acked[i]) //one of the copies is on and it hasn't acked
 						{	cur_write->copies_acked[i]=1;
 							(data_arr+ID)->valid_copies[i]=cur_write->version;
-							(data_arr+ID)->invalid_time_total[i]=0; //since it was on when someone first issued a write
-							(data_arr+ID)->invalid_time_start[i]=0; //reset
+							//(data_arr+ID)->invalid_time_total[i]=0; //since it was on when someone first issued a write
+							//(data_arr+ID)->invalid_time_start[i]=0; //reset
 							on_row[copyholders[i]]=0;
 							if(copyholders[i]==j) //skip the ack message since it's local
 								continue;
@@ -446,7 +455,7 @@ float read_off_queue(int j, data *data_arr, node *nodes, int *on_row, double  gl
 			//else
 			//for(i=0;i<rep_factor, copyholders[i]!=j;i++);	//run through copies and find the index of this node
 			
-			//since we broke both of the prio for loop and haven't touched i since... 
+			//since we broke both of the prior for loops and haven't touched i since... 
 			if(flag)
 			{	if((data_arr+ID)->valid_copies[i]!=(data_arr+ID)->num_writers)	
 					(data_arr+ID)->invalid_accesses++;
@@ -496,9 +505,10 @@ float read_off_queue(int j, data *data_arr, node *nodes, int *on_row, double  gl
 			for(i=0;i<rep_factor;i++)
 			{	if(on_row[copyholders[i]] && !cur_write->copies_acked[i]) //one of the copies is on and it hasn't acked
 				{	cur_write->copies_acked[i]=1;
-					(data_arr+ID)->valid_copies[i]=cur_write->version;
-					(data_arr+ID)->invalid_time_total[i]=0; //since it was on when someone first issued a write
-					(data_arr+ID)->invalid_time_start[i]=0; //reset
+					if((data_arr+ID)->valid_copies[i]<cur_write->version) //To ensure that a newer update isn't overwritten. 
+						(data_arr+ID)->valid_copies[i]=cur_write->version;
+					//(data_arr+ID)->invalid_time_total[i]=0; //since it was on when someone first issued a write
+					//(data_arr+ID)->invalid_time_start[i]=0; //reset
 					if(copyholders[i]==j) //skip the ack message since it's local
 						continue;
 					new_packet=malloc(sizeof(message));
@@ -537,21 +547,6 @@ float read_off_queue(int j, data *data_arr, node *nodes, int *on_row, double  gl
 	
 }
 
-//This function sets up the new write monitoring node... It has j as and index into the 
-//array, 
-int new_write_monitoring(int j, node *nodes, data *content, double global_time)
-{	write *new=malloc(sizeof(write));
-	(nodes+j)->Hits+=1;
-	(nodes+j)->Total+=1;
-	content->num_writers++; //Basically increment the most up-to-date version number
-	if(!new)
-		return -1;
-	make_write(new,content->ID, content->num_writers, content->rep_factor);
-	add_write(nodes+j, new);
-	content->mod_times=realloc(content->mod_times,sizeof(int)*content->num_writers);
-	content->mod_times[content->num_writers-1]=global_time;
-	return 0; 
-}
 
 
 
