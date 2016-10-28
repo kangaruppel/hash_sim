@@ -43,8 +43,8 @@ int main(int argc, char *argv[])
 		}
 		
 	}
-	//srand(3658);
-	srand(time(NULL));
+	srand(3658);
+	//srand(time(NULL));
 	//printf("Enter number of requests, namespace size, replication factor, and write probability.\n");
 	//scanf("%i %i %i %f", &num_requests,&namespace_size,&rep_factor, &write_probability);
 	//printf("%i %i %i %f\n", num_requests, namespace_size, rep_factor, write_probability);

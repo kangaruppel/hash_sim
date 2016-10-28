@@ -48,7 +48,7 @@ int all_queues_empty(node *nodes,int num_nodes)
 			//printf("%5i %5i %5i \n", cur->content->ID, cur->content->owner, cur->message_type);
 		if((nodes+i)->Queue)
 		{	finished=0;
-			break;
+			//break;
 		}	
 	}
 	return finished;
@@ -244,7 +244,7 @@ float read_off_queue(int j, data *data_arr, node *nodes, int *on_row, double  gl
 	int *copyholders=malloc(sizeof(int)*packet->content->rep_factor);
 	int owner=packet->content->owner;
 	int *avail_row=malloc(sizeof(int)*num_nodes);
-	int i,k, flag=1, sum_valid=0, extra, copy_index, writer_index;
+	int i,k, flag=1, sum_valid=0, extra, copy_index=-1, writer_index;
 	float time=0; 
 	write *cur_write;
 	for(i=0;i<packet->content->rep_factor;i++)
@@ -267,30 +267,35 @@ float read_off_queue(int j, data *data_arr, node *nodes, int *on_row, double  gl
 			if(MULTI_WRITER==ALL)
 				writer=1;
 			else if(MULTI_WRITER==COPIES)
-				for(i=0;i<rep_factor;i++)
-				{	if(copyholders[i]==j)
-					{	writer=1;
-						break;
-					}
+			{	//Figure out if this node is a copy holder
+				copy_index=is_copyholder(packet->content,j);
+				if(copy_index>=0)
+				{	writer=1;
+					//on_row[j]=1; //for the purpose of treating it like a normal copy 
 				}
+			}
 			if(j==owner)
-				writer=1;
+			{	writer=1;
+				//on_row[j]=1; //again, so it can be treated like a normal copy
+			}
 			//packet->content->num_writers++; //increment number of writers of this data (ever), used for versions
 			//If the node is allowed to write it... FYI, it'll also get responsibility for updating
 			if(writer)
 			{	time=.01;
-				//Do set up for a new write
+				//Do set up for a new write, includes incrementing hits
 				new_write_monitoring(j, nodes,packet->content, global_time);
-				//Figure out if this node is a copy holder
-				copy_index=is_copyholder(packet->content,j);
+				if((nodes+j)->Active_writes==0)
+					printf("Look, ya screwed up here too!\n");
+				
 				//check if there's time to send the update
-				flag=1;
+				
+				flag=0;
 				if(rep_factor>1)
 				{	if(total_time>0)
 					{	flag=0; //Don't let updates be sent, immediately throw a "4" packet on the queue. 
 					}
 					else
-					{	(nodes+j)->Updates+=1;
+					{	(nodes+j)->Updates+=1; //since there's time to send a broadcast update
 						(nodes+j)->Total+=1;
 						time=1;
 						flag=1;
@@ -298,48 +303,60 @@ float read_off_queue(int j, data *data_arr, node *nodes, int *on_row, double  gl
 					time=1; //need to change later if we aren't forcing this to take priority!!
 				}
 				//sum_valid=1;
-				if(flag)
-				{	cur_write=(nodes+j)->Active_writes;
-					for(i=0;i<rep_factor;i++)
+				sum_valid=0;
+				cur_write=(nodes+j)->Active_writes;
+				if(flag) //if sending off node 
+				{	//check in with ALL the copyholders, but ignore the ones who already ack'd
+					for(i=0;i<rep_factor;i++) //TODO: package into a function!!!
 					{	if(on_row[copyholders[i]] && !cur_write->copies_acked[i]) //one of the copies is on and it hasn't acked
 						{	cur_write->copies_acked[i]=1;
 							(data_arr+ID)->valid_copies[i]=cur_write->version;
 							(data_arr+ID)->invalid_time_total[i]=0; //since it was on when someone first issued a write
 							(data_arr+ID)->invalid_time_start[i]=0; //reset
-							if(copy_index==i) //skip the ack message since it's local
+							on_row[copyholders[i]]=0;
+							if(copyholders[i]==j) //skip the ack message since it's local
 								continue;
 							new_packet=malloc(sizeof(message));
 							make_message(new_packet,2,packet->content,NULL); //notify of update
 							add_query(nodes+copyholders[i],new_packet);
 							//avail_row[copyholders[i-1]]=0;
-							on_row[copyholders[i]]=0; //<-- replaced line above as a test.... 10-16-16
+							//on_row[copyholders[i]]=0; //<-- replaced line above as a test.... 10-16-16
 							
 						}
 						
 					}
 				}
-				sum_valid=0;
+				//Count how many copies ack'd over time.
 				for(i=0;i<rep_factor;i++)
 				{	if(!cur_write->copies_acked[i])
 						break;
 					sum_valid++;
 				}
-				if(sum_valid<rep_factor) //Add packet back on
+				//sum_valid=0;
+				
+				if(sum_valid<rep_factor) //Add update packet
 				{	new_packet=malloc(sizeof(message));
-					make_message(new_packet,4,packet->content,NULL);
-					remove_query(nodes+j,packet);
+					make_message(new_packet,4,packet->content,NULL); //************4 ADDED HERE*************************//
+					//remove_query(nodes+j,packet);
 					add_query(nodes+j,new_packet);
+					if((nodes+j)->Active_writes==0)
+						printf("Womp... Error\n");
+					remove_query(nodes+j,packet);
 				}
 				else //pull active write off of the list
-					remove_write(nodes+j,cur_write);								
+				{	remove_write(nodes+j,cur_write);	
+					remove_query(nodes+j,packet);
+				}
+				if(!(nodes+j)->Active_writes && (nodes+j)->Queue->message_type==4)
+					printf("null active write and update ordered... Game over\n");
 			}
-			else //tell owner
+			else //tell owner or copyholders
 			{	if(total_time>0) //don't send anything if not enough time
 				{	free(avail_row);
 					free(copyholders);
 					return 1;
 				}
-				
+				flag=0; 
 				time=1;
 				/*	for(k=0;k<packet->content->num_writers;k++)
 				{	if(on_row[packet->content->writers[k]])
@@ -348,26 +365,33 @@ float read_off_queue(int j, data *data_arr, node *nodes, int *on_row, double  gl
 						break;	
 					}
 				}*/
-				if(on_row[owner]) //owner is on
-				{	new_write_monitoring(owner, nodes,packet->content, global_time);
-					new_packet=malloc(sizeof(message));
-					make_message(new_packet,0,packet->content,NULL); //need to throw 0 packet on there!!
-					add_query(nodes+owner,new_packet); //I shouldn't be leaving "owner" here b/c it's not strictly correct...
-					cur_write=(nodes+owner)->Active_writes;
-					cur_write->copies_acked[0]=1;
-					(data_arr+ID)->valid_copies[0]=cur_write->version;
-					(data_arr+ID)->invalid_time_total[0]=0; //since it was on when someone first issued a write
-					(data_arr+ID)->invalid_time_start[0]=0; //reset
-					(nodes+j)->Hits+=1;
-					(nodes+j)->Total+=1;
-					(nodes+owner)->Acks++;
-					(nodes+owner)->Total++; 
-					//avail_row[owner]=0; 
-					on_row[owner]=0;
-					remove_query(nodes+j,packet);
+				for(i=0;i<rep_factor;i++)
+				{	if(!MULTI_WRITER && i>0)
+						break;
+					if(on_row[copyholders[i]]==1) //some copyholder is on, TODO: randomize this!!
+					{	//new_write_monitoring(owner, nodes,packet->content, global_time);
+						new_packet=malloc(sizeof(message));
+						make_message(new_packet,0,packet->content,NULL); //need to throw 0 packet on there!!
+						add_query(nodes+copyholders[i],new_packet); //I shouldn't be leaving "owner" here b/c it's not strictly correct...
+				//		cur_write=(nodes+owner)->Active_writes;
+			//			cur_write->copies_acked[0]=1;
+					//	(data_arr+ID)->valid_copies[0]=cur_write->version;
+					//	(data_arr+ID)->invalid_time_total[0]=0; //since it was on when someone first issued a write
+					//	(data_arr+ID)->invalid_time_start[0]=0; //reset
+						(nodes+j)->Hits+=1;
+						(nodes+j)->Total+=1;
+						(nodes+copyholders[i])->Acks++;
+						(nodes+copyholders[i])->Total++; 
+						//avail_row[owner]=0; 
+						on_row[copyholders[i]]=0;
+						remove_query(nodes+j,packet);
+						flag=1;
+						break;
+					}
 				}
-				else
-				{	(nodes+j)->Misses++;
+				if(!flag)//meaning we didn't get a hold of any copies 
+				{	//remove_query(nodes+j,packet);
+					(nodes+j)->Misses++;
 					(nodes+j)->Total++;
 				}
 				
@@ -456,43 +480,52 @@ float read_off_queue(int j, data *data_arr, node *nodes, int *on_row, double  gl
 				free(copyholders);
 				return 1;
 			}
+			if(!(nodes+j)->Active_writes)
+				printf("Ya done screwed it up\n");
 			//find correct update in list of active writes on node
-			for(cur_write=(nodes+j)->Active_writes;cur_write->next, cur_write->ID!=packet->content->ID;cur_write=cur_write->next);
+			for(cur_write=(nodes+j)->Active_writes;cur_write->next;cur_write=cur_write->next)
+			{	 if(cur_write->ID==packet->content->ID)
+					 break; 
+			}
+			if(cur_write->ID!=packet->content->ID)
+				printf("Bad! no matching update found\n");
 			(nodes+j)->Updates++;
 			(nodes+j)->Total++;
 			time=1;
-			
+			copy_index=is_copyholder(packet->content,j);
 			for(i=0;i<rep_factor;i++)
-					{	if(on_row[copyholders[i]] && !cur_write->copies_acked[i]) //one of the copies is on and it hasn't acked
-						{	cur_write->copies_acked[i]=1;
-							(data_arr+ID)->valid_copies[i]=cur_write->version;
-							(data_arr+ID)->invalid_time_total[i]=0; //since it was on when someone first issued a write
-							(data_arr+ID)->invalid_time_start[i]=0; //reset
-							if(copy_index==i) //skip the ack message since it's local
-								continue;
-							new_packet=malloc(sizeof(message));
-							make_message(new_packet,2,packet->content,NULL); //notify of update
-							add_query(nodes+copyholders[i],new_packet);
-							//avail_row[copyholders[i-1]]=0;
-							on_row[copyholders[i]]=0; //<-- replaced line above as a test.... 10-16-16
-							
-						}
-						
-					}
+			{	if(on_row[copyholders[i]] && !cur_write->copies_acked[i]) //one of the copies is on and it hasn't acked
+				{	cur_write->copies_acked[i]=1;
+					(data_arr+ID)->valid_copies[i]=cur_write->version;
+					(data_arr+ID)->invalid_time_total[i]=0; //since it was on when someone first issued a write
+					(data_arr+ID)->invalid_time_start[i]=0; //reset
+					if(copyholders[i]==j) //skip the ack message since it's local
+						continue;
+					new_packet=malloc(sizeof(message));
+					make_message(new_packet,2,packet->content,NULL); //notify of update
+					add_query(nodes+copyholders[i],new_packet);
+					//avail_row[copyholders[i-1]]=0;
+					on_row[copyholders[i]]=0; //<-- replaced line above as a test.... 10-16-16
+					
+				}
+				
+			}
 			sum_valid=0;
-				for(i=0;i<rep_factor;i++)
-				{	if(!cur_write->copies_acked[i])
-						break;
-					sum_valid++;
-				}
-				if(sum_valid<rep_factor) //Add packet back on
-				{	new_packet=malloc(sizeof(message));
-					make_message(new_packet,4,packet->content,NULL);
-					remove_query(nodes+j,packet);
-					add_query(nodes+j,new_packet);
-				}
-				else //pull active write off of the list
-					remove_write(nodes+j,cur_write);
+			for(i=0;i<rep_factor;i++)
+			{	if(!cur_write->copies_acked[i])
+					break;
+				sum_valid++;
+			}
+			/*if(sum_valid<rep_factor) //Add packet back on -->why the heck are we bothering??? 
+			{	new_packet=malloc(sizeof(message));
+				make_message(new_packet,4,packet->content,NULL);
+				remove_query(nodes+j,packet);
+				add_query(nodes+j,new_packet);
+			}*/
+			if(sum_valid>=rep_factor) //pull active write off of the list
+			{	remove_write(nodes+j,cur_write);
+				remove_query(nodes+j,packet);
+			}
 			break;
 		default: 
 			printf("Something screwed up really badly!!!\n");
@@ -504,11 +537,13 @@ float read_off_queue(int j, data *data_arr, node *nodes, int *on_row, double  gl
 	
 }
 
+//This function sets up the new write monitoring node... It has j as and index into the 
+//array, 
 int new_write_monitoring(int j, node *nodes, data *content, double global_time)
 {	write *new=malloc(sizeof(write));
 	(nodes+j)->Hits+=1;
 	(nodes+j)->Total+=1;
-	content->num_writers++;
+	content->num_writers++; //Basically increment the most up-to-date version number
 	if(!new)
 		return -1;
 	make_write(new,content->ID, content->num_writers, content->rep_factor);

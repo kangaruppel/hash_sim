@@ -180,6 +180,8 @@ int make_write(write *input, int ID, int version, int rep_factor)
 //Perform head insertion of new write into list of ongoing writes. 
 int add_write(node *input,write *new_request)
 {	//printf("Adding %i %i %i to %i\n", new_request->content->ID, new_request->content->owner, new_request->message_type, input->ID);
+	if(!new_request)
+		printf("Add write failed!!\n");
 	new_request->next=input->Active_writes; 
 	input->Active_writes=new_request; 	
 	return 0; 
