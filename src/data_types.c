@@ -78,7 +78,7 @@ void print_queue(node *input)
 }
 
 //Initialize a message
-int make_message(message *input, int type, data *stuff, message *next)
+int make_message(message *input,int sender, int type, data *stuff, message *next)
 {	//input=malloc(sizeof(message));
 	if(!input)
 		return -1;
@@ -86,6 +86,7 @@ int make_message(message *input, int type, data *stuff, message *next)
 	{	printf("Error!");
 		return -1;
 	}
+	input->sender=sender; 
 	input->message_type=type;
 	input->content=stuff;
 	input->next=next;
@@ -180,8 +181,19 @@ int make_write(write *input, int ID, int version, int rep_factor)
 //Perform head insertion of new write into list of ongoing writes. 
 int add_write(node *input,write *new_request)
 {	//printf("Adding %i %i %i to %i\n", new_request->content->ID, new_request->content->owner, new_request->message_type, input->ID);
+	write *cur;
+	message *cur2,  *temp;
 	if(!new_request)
 		printf("Add write failed!!\n");
+	for(cur=input->Active_writes;cur->ID!=new_request->ID, cur; cur=cur->next);
+	if(cur)
+	{	remove_write(input,cur);
+		for(cur2=input->Queue;cur2->next;cur2=temp)
+		{	temp=cur2->next;
+			if(cur2->message_type==4 && cur2->content->ID == new_request->ID) //If you find an update order from a stale copy, get that out of there!
+				remove_query(input,cur2);
+		}
+	}
 	new_request->next=input->Active_writes; 
 	input->Active_writes=new_request; 	
 	return 0; 

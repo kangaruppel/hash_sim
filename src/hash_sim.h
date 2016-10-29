@@ -28,6 +28,7 @@ typedef struct write_{
 typedef struct message_{ 
 	int message_type;
 	data *content;
+	int sender;
 	struct message_ *next;
 }message;
 
@@ -48,8 +49,8 @@ int remove_query(node *, message *);
 void print_queue(node *);
 int build_node_arr(node *, int, int, int, float, data *);
 
-int make_message(message *, int, data *, message *);
-message * build_request_list(int, int, data *, float);
+int make_message(message *, int,int, data *, message *);
+message * build_request_list(int, int, data *, float,int);
 
 int make_write(write *, int, int, int);
 int add_write(node *, write *);
@@ -70,3 +71,4 @@ int new_write_monitoring(int j, node *nodes, data *content, double global_time);
 
 int RETRY_LEVEL;
 int MULTI_WRITER;
+int FINISH_ALL_UPDATES;

@@ -12,7 +12,7 @@ int build_node_arr(node *input, int num_nodes, int namespace_size, int num_reque
 	message *requests, *cur;
 	for(i=0;i<num_nodes;i++) 
 	{	//printf("Node %i: \n",i);
-		requests=build_request_list(num_requests,namespace_size,data_arr,write_prob);
+		requests=build_request_list(num_requests,namespace_size,data_arr,write_prob,i);
 		make_node(input+i,i,requests);
 		//for(cur=(input+i)->Queue;cur;cur=cur->next)
 		//	printf("%5d \t %5d \t %5d \t \n", cur->content->ID, cur->content->owner, cur->message_type);		
@@ -21,19 +21,19 @@ int build_node_arr(node *input, int num_nodes, int namespace_size, int num_reque
 	return 0; 
 }
 
-message * build_request_list(int num_requests, int namespace_size, data *data_arr, float write_prob)
+message * build_request_list(int num_requests, int namespace_size, data *data_arr, float write_prob, int sender)
 {	int i, message_type;
 	data *data_addr;
 	message *new, *head;
 	head=malloc(sizeof(message));
 	data_addr=data_arr+(rand()%namespace_size);
 	message_type=(rand()%100)>(write_prob*100);
-	make_message(head,message_type,data_addr,NULL);
+	make_message(head,sender,message_type,data_addr,NULL);
 	for(i=1;i<num_requests;i++)
 	{	data_addr=data_arr+(rand()%namespace_size);
 		message_type=(rand()%100)>(write_prob*100);
 		new=malloc(sizeof(message));
-		make_message(new,message_type,data_addr,head);
+		make_message(new,sender,message_type,data_addr,head);
 		head=new;
 	}
 	return head;
@@ -41,7 +41,7 @@ message * build_request_list(int num_requests, int namespace_size, data *data_ar
 
 int all_queues_empty(node *nodes,int num_nodes)
 {	int finished=1,i;
-	message *cur;
+	message *cur,*temp;
 	for(i=0;i<num_nodes;i++)
 	{	//printf("Node %i: \n",i);
 		//for(cur=(nodes+i)->Queue;cur;cur=cur->next)
@@ -52,10 +52,16 @@ int all_queues_empty(node *nodes,int num_nodes)
 				break;
 			}
 			else //If the simulation finishes if only update messages are left
-			{	if((nodes+i)->Queue->message_type!=4)
-				{	finished=0;
-					break;
+			{	for(temp=(nodes+i)->Queue;temp;temp=temp->next)
+				{	if(!temp)
+						break;
+					if((temp)->message_type!=4)
+					{	finished=0;
+						break;
+					}
 				}
+				if(finished==0)
+					break;
 			}
 			
 		}	
@@ -253,7 +259,7 @@ float read_off_queue(int j, data *data_arr, node *nodes, int *on_row, double  gl
 	int *copyholders=malloc(sizeof(int)*packet->content->rep_factor);
 	int owner=packet->content->owner;
 	int *avail_row=malloc(sizeof(int)*num_nodes);
-	int i,k, flag=1, sum_valid=0, extra, copy_index=-1, writer_index;
+	int i,k, flag=1, sum_valid=0, extra, copy_index=-1, writer_index, copy_index2=-1;
 	float time=0; 
 	write *cur_write;
 	for(i=0;i<packet->content->rep_factor;i++)
@@ -326,7 +332,7 @@ float read_off_queue(int j, data *data_arr, node *nodes, int *on_row, double  gl
 							if(copyholders[i]==j) //skip the ack message since it's local
 								continue;
 							new_packet=malloc(sizeof(message));
-							make_message(new_packet,2,packet->content,NULL); //notify of update
+							make_message(new_packet,j, 2,packet->content,NULL); //notify of update
 							add_query(nodes+copyholders[i],new_packet);
 							//avail_row[copyholders[i-1]]=0;
 							//on_row[copyholders[i]]=0; //<-- replaced line above as a test.... 10-16-16
@@ -345,7 +351,7 @@ float read_off_queue(int j, data *data_arr, node *nodes, int *on_row, double  gl
 				
 				if(sum_valid<rep_factor) //Add update packet
 				{	new_packet=malloc(sizeof(message));
-					make_message(new_packet,4,packet->content,NULL); //************4 ADDED HERE*************************//
+					make_message(new_packet,j,4,packet->content,NULL); //************4 ADDED HERE*************************//
 					//remove_query(nodes+j,packet);
 					add_query(nodes+j,new_packet);
 					if((nodes+j)->Active_writes==0)
@@ -380,7 +386,7 @@ float read_off_queue(int j, data *data_arr, node *nodes, int *on_row, double  gl
 					if(on_row[copyholders[i]]==1) //some copyholder is on, TODO: randomize this!!
 					{	//new_write_monitoring(owner, nodes,packet->content, global_time);
 						new_packet=malloc(sizeof(message));
-						make_message(new_packet,0,packet->content,NULL); //need to throw 0 packet on there!!
+						make_message(new_packet,j,0,packet->content,NULL); //need to throw 0 packet on there!!
 						add_query(nodes+copyholders[i],new_packet); //I shouldn't be leaving "owner" here b/c it's not strictly correct...
 				//		cur_write=(nodes+owner)->Active_writes;
 			//			cur_write->copies_acked[0]=1;
@@ -433,7 +439,7 @@ float read_off_queue(int j, data *data_arr, node *nodes, int *on_row, double  gl
 				for(i=0;i<rep_factor;i++) //check for any copyholders that are on. 
 				{	if(on_row[copyholders[i]]) //TODO: randomize this too
 					{	new_packet=malloc(sizeof(message));
-						make_message(new_packet,3,packet->content,NULL); //notify of update
+						make_message(new_packet,j,3,packet->content,NULL); //notify of update
 						add_query(nodes+copyholders[i],new_packet);
 						//avail_row[copyholders[i-1]]=0;
 						on_row[copyholders[i]]=0;
@@ -466,6 +472,19 @@ float read_off_queue(int j, data *data_arr, node *nodes, int *on_row, double  gl
 			{	free(avail_row);
 				free(copyholders);
 				return 1;
+			}
+			copy_index=is_copyholder(packet->content,j);
+			copy_index2=is_copyholder(packet->content,packet->sender);
+			//TODO: get active write being pushed onto this node from somewhere logical...
+			//Need to be able to change things accordingly. Also, we might not want all of this
+			//functionality hard coded in... probably worth adding it as flags. 
+			if(copy_index>-1)//if j is a copyholder and it's getting updated
+			{	if((data_arr+ID)->valid_copies[copy_index]<(data_arr+ID)->valid_copies[copy_index2])
+				{	//Only update if receiving node's copy is older
+					(nodes+j)->Updates++;
+					(nodes+j)->Total++;
+					(data_arr+ID)->valid_copies[copy_index]=
+				}
 			}
 			remove_query(nodes+j,packet);
 			(nodes+j)->Updates++;
@@ -512,7 +531,7 @@ float read_off_queue(int j, data *data_arr, node *nodes, int *on_row, double  gl
 					if(copyholders[i]==j) //skip the ack message since it's local
 						continue;
 					new_packet=malloc(sizeof(message));
-					make_message(new_packet,2,packet->content,NULL); //notify of update
+					make_message(new_packet,j,2,packet->content,NULL); //notify of update
 					add_query(nodes+copyholders[i],new_packet);
 					//avail_row[copyholders[i-1]]=0;
 					on_row[copyholders[i]]=0; //<-- replaced line above as a test.... 10-16-16

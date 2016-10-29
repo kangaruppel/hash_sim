@@ -1,4 +1,3 @@
-#!/bin/bash 
 #loop through and check the different queue lengths
 NUMS="10 50 100 500 1000 5000 10000"
 for i in $NUMS
