@@ -144,7 +144,7 @@ long process_requests(int **on_mat,node *nodes, data *data_arr, int num_nodes, i
 	while(!done)
 	{	num_on=0; on_index=0; 
 		for(k=0;k<num_nodes;k++)
-		{	avail_row[k]=on_mat[i][k];
+		{	avail_row[k]=on_mat[i][k]; //Build initial row of nodes that are on
 			num_on+=on_mat[i][k];
 			if(on_mat[i][k])
 			{	nodes_on[on_index]=k;
@@ -176,8 +176,8 @@ long process_requests(int **on_mat,node *nodes, data *data_arr, int num_nodes, i
 			{	//printf("Checking node %i\n",j);
 				on=1;
 				num_tried++;
-				if(avail_row[j])
-				{	
+				//if(avail_row[j]) //<-- just commented out
+				//{	
 					while(1)
 					{	time_out=read_off_queue(j,data_arr,nodes,avail_row,time_to_finish,total_time, num_nodes);
 						avail_row[j]=0;
@@ -189,7 +189,7 @@ long process_requests(int **on_mat,node *nodes, data *data_arr, int num_nodes, i
 						if(total_time>=1 || !(nodes+j)->Queue)
 							break;
 					}
-				}
+				//}
 			}
 		}
 		//if(num_on>0)
@@ -325,12 +325,14 @@ float read_off_queue(int j, data *data_arr, node *nodes, int *on_row, double  gl
 					for(i=0;i<rep_factor;i++) //TODO: package into a function!!!
 					{	if(on_row[copyholders[i]] && !cur_write->copies_acked[i]) //one of the copies is on and it hasn't acked
 						{	cur_write->copies_acked[i]=1;
-							(data_arr+ID)->valid_copies[i]=cur_write->version;
+							//(data_arr+ID)->valid_copies[i]=cur_write->version;
 							//(data_arr+ID)->invalid_time_total[i]=0; //since it was on when someone first issued a write
 							//(data_arr+ID)->invalid_time_start[i]=0; //reset
 							on_row[copyholders[i]]=0;
 							if(copyholders[i]==j) //skip the ack message since it's local
+							{	(data_arr+ID)->valid_copies[i]=cur_write->version;
 								continue;
+							}
 							new_packet=malloc(sizeof(message));
 							make_message(new_packet,j, 2,packet->content,NULL); //notify of update
 							add_query(nodes+copyholders[i],new_packet);
@@ -475,15 +477,13 @@ float read_off_queue(int j, data *data_arr, node *nodes, int *on_row, double  gl
 			}
 			copy_index=is_copyholder(packet->content,j);
 			copy_index2=is_copyholder(packet->content,packet->sender);
-			//TODO: get active write being pushed onto this node from somewhere logical...
-			//Need to be able to change things accordingly. Also, we might not want all of this
-			//functionality hard coded in... probably worth adding it as flags. 
 			if(copy_index>-1)//if j is a copyholder and it's getting updated
-			{	if((data_arr+ID)->valid_copies[copy_index]<(data_arr+ID)->valid_copies[copy_index2])
+			{	if((data_arr+ID)->valid_copies[copy_index]<(data_arr+ID)->valid_copies[copy_index2] || NEWER_WRITE_NOT_REQ)
 				{	//Only update if receiving node's copy is older
-					(nodes+j)->Updates++;
-					(nodes+j)->Total++;
-					(data_arr+ID)->valid_copies[copy_index]=
+					//(nodes+j)->Updates++;
+					//(nodes+j)->Total++;
+					//(nodes+j)->
+					(data_arr+ID)->valid_copies[copy_index]=(data_arr+ID)->valid_copies[copy_index2];
 				}
 			}
 			remove_query(nodes+j,packet);
@@ -529,7 +529,7 @@ float read_off_queue(int j, data *data_arr, node *nodes, int *on_row, double  gl
 					//(data_arr+ID)->invalid_time_total[i]=0; //since it was on when someone first issued a write
 					//(data_arr+ID)->invalid_time_start[i]=0; //reset
 					if(copyholders[i]==j) //skip the ack message since it's local
-						continue;
+						continue;	//realistically there's no way the local shouldn't already be ack'd. 
 					new_packet=malloc(sizeof(message));
 					make_message(new_packet,j,2,packet->content,NULL); //notify of update
 					add_query(nodes+copyholders[i],new_packet);

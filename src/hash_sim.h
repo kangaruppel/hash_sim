@@ -5,6 +5,13 @@
 #define ALL 1
 #define COPIES 2
 
+typedef struct lock_{
+	int ID;
+	int owner;
+	int holder;
+	int *stakeholders;
+}lock;
+
 typedef struct data_{
 	int ID;
 	int owner;
@@ -16,7 +23,10 @@ typedef struct data_{
 	int *invalid_time_start;
 	int *invalid_time_total;
 	int *mod_times;
+	lock data_lock; 
 }data;
+
+
 
 typedef struct write_{
 	int ID;
@@ -72,3 +82,4 @@ int new_write_monitoring(int j, node *nodes, data *content, double global_time);
 int RETRY_LEVEL;
 int MULTI_WRITER;
 int FINISH_ALL_UPDATES;
+int NEWER_WRITE_NOT_REQ;

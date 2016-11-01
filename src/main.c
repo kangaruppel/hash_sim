@@ -14,6 +14,7 @@ int main(int argc, char *argv[])
 	RETRY_LEVEL=0;
 	MULTI_WRITER=0;
 	FINISH_ALL_UPDATES=1;
+	NEWER_WRITE_NOT_REQ=0;
 	if(argc < 2)
 	{	fprintf(stderr, "Not enough input arguments!", -1);
 		return -1; 
@@ -42,6 +43,9 @@ int main(int argc, char *argv[])
 				case 'u': //finish all updates or leave if all other requests filled
 					FINISH_ALL_UPDATES=atoi(argv[i+1]);
 					break;
+				case 'n': //newer write requirement
+					NEWER_WRITE_NOT_REQ=atoi(argv[i+1]);
+					break; 
 			}
 			
 		}
