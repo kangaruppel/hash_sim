@@ -6,6 +6,7 @@
 #define COPIES 2
 
 typedef struct lock_{
+	int locked;
 	int ID;
 	int owner;
 	int holder;
@@ -19,11 +20,17 @@ typedef struct data_{
 	int invalid_accesses;
 	int num_writers;
 	int *copyholders;
+	int *mod_times;
 	int *valid_copies;
 	int *invalid_time_start;
-	int *invalid_time_total;
-	int *mod_times;
-	lock data_lock; 
+	int *on_while_invalid_cnt;
+	int *time_on_and_invalid; 
+	int *invalidated_cnt;
+	int *last_onoff_state;//0=off, 1=on
+	int *last_valid_state;//0=stale, 1=valid
+	float *avg_time_on_while_invalid;
+	float *avg_time_invalid; 
+	lock *data_lock; 
 }data;
 
 
@@ -75,7 +82,7 @@ int is_copyholder(data *input, int dut);
 long process_requests(int **, node *, data *, int, int, int);
 float read_off_queue(int, data *, node *, int *, double, float, int);
 int all_queues_empty(node *, int);
-float staleness_checker(data *, long *, int);
+float staleness_checker(data *, int, int, int *);
 void shuffle(int *, size_t );
 int new_write_monitoring(int j, node *nodes, data *content, double global_time);
 
@@ -83,3 +90,4 @@ int RETRY_LEVEL;
 int MULTI_WRITER;
 int FINISH_ALL_UPDATES;
 int NEWER_WRITE_NOT_REQ;
+FILE *STALE_OUTPUT_FILE; 

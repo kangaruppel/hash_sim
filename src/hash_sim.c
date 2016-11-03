@@ -69,22 +69,39 @@ int all_queues_empty(node *nodes,int num_nodes)
 	return finished;
 }
 
-float staleness_checker(data *data_arr, long *stale_vector, int namespace_size)
-{	int total_var_copies=0, total_stale_copies=0;
-	int i,j,stale_copies,stale_time;
+float staleness_checker(data *data_arr, int namespace_size, int global_time, int *on_row)
+{	int total_var_copies=0, total_stale_copies=0, time_invalid=0;
+	int i,j,stale_copies,stale_time, power_state,last_power_state,last_valid_state, valid_state=1;
 	float staleness;
 	for(i=0;i<namespace_size;i++)
 	{	total_var_copies+=(data_arr+i)->rep_factor;
 		stale_copies=0;
-		stale_time=0; 
-		for(j=0;j<(data_arr+i)->rep_factor;j++)
-		{	stale_copies+=!((data_arr+i)->valid_copies[j]);
-			stale_time+=(data_arr+i)->invalid_time_total[j];
-			
-			(data_arr+i)->invalid_time_total[j]=0;
+		for(j=0;j<(data_arr+i)->rep_factor;j++)//roll through all the copies
+		{	valid_state=1; 
+			last_valid_state=(data_arr+i)->last_valid_state[j];
+			last_power_state=(data_arr+i)->last_onoff_state[j];
+			power_state=on_row[(data_arr+i)->copyholders[j]]; //check if copyholder is on or off
+			if((data_arr+i)->valid_copies[j]!=(data_arr+i)->num_writers) //check if copy is stale
+			{	stale_copies++;
+				valid_state=0;
+			}
+			if(!valid_state && last_valid_state)//If newly invalid, inc invalidated_cnt
+				(data_arr+i)->invalidated_cnt[j]++;
+			if(!valid_state && !last_power_state && power_state)//if invalid and going from off to on TODO: use this to profile on times while invalid 
+				(data_arr+i)->on_while_invalid_cnt[j]++; 
+			if(!valid_state && power_state)//If on and invalid
+				(data_arr+i)->time_on_and_invalid[j]++;
+			if(valid_state && !last_valid_state && (data_arr+i)->invalid_time_start[j])//If newly valid, run through and update avgs
+			{	time_invalid=global_time-(data_arr+i)->invalid_time_start[j]; //TODO: make sure invalid_time_start always > 0 
+				(data_arr+i)->invalid_time_start[j]=0;
+				(data_arr+i)->avg_time_on_while_invalid[j]=((data_arr+i)->avg_time_on_while_invalid[j]*((data_arr+i)->invalidated_cnt[j]-1)+(data_arr+i)->on_while_invalid_cnt[j])/(data_arr+i)->invalidated_cnt[j];
+				(data_arr+i)->avg_time_invalid[j]=((data_arr+i)->avg_time_invalid[j]*((data_arr+i)->invalidated_cnt[j]-1)+time_invalid)/(data_arr+i)->invalidated_cnt[j];
+			}
+			(data_arr+i)->last_onoff_state[j]=power_state;
+			(data_arr+i)->last_valid_state[j]=valid_state; 
 		}
 		total_stale_copies+=stale_copies;
-		stale_vector[i]+=stale_time;
+		//stale_vector[i]+=stale_time;
 		//if(stale_vector[i]>1)
 			//	printf("out of date!!\n");
 	}
@@ -93,6 +110,7 @@ float staleness_checker(data *data_arr, long *stale_vector, int namespace_size)
 	staleness=(float)total_stale_copies/(float)total_var_copies;
 	//printf("%f\n",staleness);
 	//printf("%i %i %f\n",total_stale_copies,total_var_copies, staleness);
+	
 	return staleness;
 } 
 
@@ -116,6 +134,7 @@ long process_requests(int **on_mat,node *nodes, data *data_arr, int num_nodes, i
 	long time_to_finish=0;
 	int *nodes_on=malloc(sizeof(int)*num_nodes); 
 	int *avail_row=malloc(sizeof(int)*num_nodes);
+	int *on_row=malloc(sizeof(int)*num_nodes); 
 	long *stale_vector=malloc(sizeof(long)*namespace_size);
 	float *stale_timelog=malloc(sizeof(float)*timesteps);
 	long total_queued_reqs;
@@ -145,6 +164,7 @@ long process_requests(int **on_mat,node *nodes, data *data_arr, int num_nodes, i
 	{	num_on=0; on_index=0; 
 		for(k=0;k<num_nodes;k++)
 		{	avail_row[k]=on_mat[i][k]; //Build initial row of nodes that are on
+			on_row[k]=on_mat[i][k]; //build duplicate for staleness processing later
 			num_on+=on_mat[i][k];
 			if(on_mat[i][k])
 			{	nodes_on[on_index]=k;
@@ -176,20 +196,22 @@ long process_requests(int **on_mat,node *nodes, data *data_arr, int num_nodes, i
 			{	//printf("Checking node %i\n",j);
 				on=1;
 				num_tried++;
-				//if(avail_row[j]) //<-- just commented out
-				//{	
+				if(avail_row[j]) //<-- just commented out
+				{	
 					while(1)
 					{	time_out=read_off_queue(j,data_arr,nodes,avail_row,time_to_finish,total_time, num_nodes);
-						avail_row[j]=0;
+						//avail_row[j]=0;
 						//printf("Avail_row: ");
 						//	for(k=0;k<num_nodes;k++)
 						//	printf("%i ",avail_row[k]);
 						//printf("\n");
 						total_time+=time_out;
 						if(total_time>=1 || !(nodes+j)->Queue)
+						{	avail_row[j]=0; //just added here 11-3 at 10:56	
 							break;
+						}
 					}
-				//}
+				}
 			}
 		}
 		//if(num_on>0)
@@ -211,8 +233,12 @@ long process_requests(int **on_mat,node *nodes, data *data_arr, int num_nodes, i
 			on=0;
 		}*/
 		done=all_queues_empty(nodes,num_nodes);
-		intermed=staleness_checker(data_arr,stale_vector,namespace_size); 
+		intermed=staleness_checker(data_arr,namespace_size,time_to_finish, on_row); 
+		if(intermed<0)
+			printf("Wrong wrong wrong!!\n\n");
 		stale_timelog[time_to_finish]=intermed;
+		if(!(time_to_finish%50))
+		fprintf(STALE_OUTPUT_FILE,"%d : %f\n", time_to_finish,intermed);
 		time_to_finish++;
 		i++;
 		if(i>=timesteps)
@@ -220,23 +246,27 @@ long process_requests(int **on_mat,node *nodes, data *data_arr, int num_nodes, i
 			turnovers++;
 			stale_timelog=realloc(stale_timelog,sizeof(int)*timesteps*turnovers);
 			total_queued_reqs=0;
-			for(k=0;k<num_nodes;k++)
-			{	cur=(nodes+k)->Queue;
-				while(cur)
-				{	cur=cur->next;
-					total_queued_reqs++;	
+			if(!(turnovers%5))
+			{	for(k=0;k<num_nodes;k++)
+				{	cur=(nodes+k)->Queue;
+					while(cur)
+					{	cur=cur->next;
+						total_queued_reqs++;	
+					}
 				}
+				printf("Not dead yet Time=%d Queded requests=%d\n",time_to_finish, total_queued_reqs);
 			}
-			printf("Not dead yet Time=%d Queded requests=%d\n",time_to_finish, total_queued_reqs);
 		}
 	}
+	fprintf(STALE_OUTPUT_FILE,"--------------------------------------------------\n\n");
+	fclose(STALE_OUTPUT_FILE);
 	//output_file=fopen("output.txt","w");
-	printf("Stale time log: \n");
+	//printf("Stale time log: \n");
 	//for(i=0;i<time_to_finish;i++)
 	//	printf("%f\n", stale_timelog[i]);
 	//printf("Cumulative staleness per variable\n");
 	//for(i=0;i<namespace_size;i++)
-	//	printf("%ld\n",stale_vector[i]);
+	////	printf("%ld\n",stale_vector[i]);
 	printf("\n");
 	//fclose(output_file);
 	free(avail_row);
@@ -276,7 +306,7 @@ float read_off_queue(int j, data *data_arr, node *nodes, int *on_row, double  gl
 			else if(packet->content->num_writers<WRITER_LEVEL)
 			{	packet->content->num_writers++; 	
 				packet->content->writers=realloc(packet->content->writers,packet->content->num_writers*sizeof(int));
-				packet->content->writers[packet->content->num_writers-1]=j; 
+				packet->content->writers[padisp cket->content->num_writers-1]=j; 
 				writer=1;
 			}*/
 			if(MULTI_WRITER==ALL)
@@ -305,9 +335,13 @@ float read_off_queue(int j, data *data_arr, node *nodes, int *on_row, double  gl
 				//check if there's time to send the update
 				
 				flag=0;
+				cur_write=(nodes+j)->Active_writes;
 				if(rep_factor>1)
 				{	if(total_time>0)
-					{	flag=0; //Don't let updates be sent, immediately throw a "4" packet on the queue. 
+					{	i=is_copyholder(packet->content,j);
+						if(i>-1) //update if it's a local copy so it's not invalid anymore
+							(data_arr+ID)->valid_copies[i]=cur_write->version;
+						flag=0; //Don't let updates be sent, immediately throw a "4" packet on the queue. 
 					}
 					else
 					{	(nodes+j)->Updates+=1; //since there's time to send a broadcast update
@@ -319,7 +353,7 @@ float read_off_queue(int j, data *data_arr, node *nodes, int *on_row, double  gl
 				}
 				//sum_valid=1;
 				sum_valid=0;
-				cur_write=(nodes+j)->Active_writes;
+
 				if(flag) //if sending off node 
 				{	//check in with ALL the copyholders, but ignore the ones who already ack'd
 					for(i=0;i<rep_factor;i++) //TODO: package into a function!!!

@@ -10,11 +10,16 @@ int main(int argc, char *argv[])
 	float write_probability=.25;
 	char test,junk;
 	int i=0, j=0, test2;
-	long time_out=0; 
+	long time_out=0;
+	time_t rawtime; 
+	struct tm * timeinfo; 
+	time (&rawtime);
+	timeinfo = localtime (&rawtime);
 	RETRY_LEVEL=0;
 	MULTI_WRITER=0;
 	FINISH_ALL_UPDATES=1;
 	NEWER_WRITE_NOT_REQ=0;
+	STALE_OUTPUT_FILE=fopen("stale_output.txt","a");
 	if(argc < 2)
 	{	fprintf(stderr, "Not enough input arguments!", -1);
 		return -1; 
@@ -46,12 +51,18 @@ int main(int argc, char *argv[])
 				case 'n': //newer write requirement
 					NEWER_WRITE_NOT_REQ=atoi(argv[i+1]);
 					break; 
+				case 'f': //writing to a different file
+					fclose(STALE_OUTPUT_FILE);
+					STALE_OUTPUT_FILE=fopen(argv[i+1],"a");
+					break;
 			}
 			
 		}
 		
 	}
-	srand(3658);
+	fprintf(STALE_OUTPUT_FILE,"-----------Run at %s--------------\n",asctime(timeinfo));
+	//srand(3658);
+	srand(50183);
 	//srand(time(NULL));
 	//printf("Enter number of requests, namespace size, replication factor, and write probability.\n");
 	//scanf("%i %i %i %f", &num_requests,&namespace_size,&rep_factor, &write_probability);
@@ -103,7 +114,7 @@ int main(int argc, char *argv[])
 	node *node_arr=malloc(sizeof(node)*num_nodes);
 	build_node_arr(node_arr, num_nodes, namespace_size,num_requests, write_probability, data_arr);
 	time_out=process_requests(on_mat,node_arr,data_arr,num_nodes,time_outsteps,namespace_size);
-	printf("time_out to finish= %d\n",time_out);
+	
 	hits=0;misses=0;updates=0;acks=0;total=0;
 	for(i=0;i<num_nodes;i++)
 	{	hits+=(node_arr+i)->Hits;
@@ -114,7 +125,12 @@ int main(int argc, char *argv[])
 	}
 	invalid_accesses=0;
 	for(i=0;i<namespace_size;i++)
-		invalid_accesses+=(data_arr+i)->invalid_accesses;
+	{	invalid_accesses+=(data_arr+i)->invalid_accesses;
+		printf("----------Variable %i, Written %i Times, Invalid Accesses %i----------\n",i, (data_arr+i)->num_writers, (data_arr+i)->invalid_accesses);
+		for(j=0;j<(data_arr+i)->rep_factor;j++)
+			printf("copy %i: Inval %i Times, Avg Time Inval: %.2f Avg Time Inval & On: %.2f \n",j,(data_arr+i)->invalidated_cnt[j],(data_arr+i)->avg_time_invalid[j],(data_arr+i)->avg_time_on_while_invalid[j]); 
+	}
+	printf("time_out to finish= %d\n",time_out);
 	printf("Hits=%i\nMisses=%i\nUpdates=%i\nAcks=%i\nTotal=%i\n",hits,misses,updates,acks,total);
 	printf("Reads of invalid data: %i\n",invalid_accesses);
 	/*rint_queue(node_arr+3);

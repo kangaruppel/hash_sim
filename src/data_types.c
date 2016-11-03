@@ -1,4 +1,26 @@
 #include "hash_sim.h"
+
+int make_lock(lock *new_lock,int ID, int owner, int rep_factor)
+{	int i; 
+	new_lock->locked=0; 
+	new_lock->ID=ID;
+	new_lock->owner=owner;
+	new_lock->holder=owner;
+	new_lock->stakeholders=malloc(sizeof(int)*rep_factor);
+	if(!new_lock->stakeholders)
+		return -1;
+	for(i=0;i<rep_factor;i++)
+		new_lock->stakeholders[i]=0;
+	return 0; 
+}
+
+int free_lock(lock *lock_in)
+{	free(lock_in->stakeholders);
+	free(lock_in);
+	return 0; 
+}
+
+
 //This function takes a pointer to a node, and ID number and a pointer 
 //to a linked list of messages as input and initializes the node. 
 int make_node(node *new_node, int ID, message *requests)
@@ -33,7 +55,6 @@ int free_node(node *node_in)
 	}
 	free(prev2);
 	free(prev);
-
 	return 0; 
 }
 
@@ -96,6 +117,8 @@ int make_message(message *input,int sender, int type, data *stuff, message *next
 //Initialize a piece of data
 int make_data(data *input, int ID, int num_nodes, int rep_factor)
 {	int i;
+	lock *new_lock; 
+	new_lock=malloc(sizeof(lock));
 	//input=malloc(sizeof(data));
 	if(!input)
 		return -1;
@@ -103,20 +126,34 @@ int make_data(data *input, int ID, int num_nodes, int rep_factor)
 	input->owner=ID % num_nodes; 
 	input->rep_factor=rep_factor;
 	input->invalid_accesses=0;
-	input->num_writers=1;
+	input->num_writers=0;
 	input->copyholders=copyfinder(num_nodes,rep_factor,input->owner);
 	input->mod_times=malloc(sizeof(int));
 	input->valid_copies=malloc(sizeof(int)*rep_factor);
 	input->invalid_time_start=malloc(sizeof(int)*rep_factor);
-	input->invalid_time_total=malloc(sizeof(int)*rep_factor);
+	input->on_while_invalid_cnt = malloc(sizeof(int)*rep_factor);
+	input->time_on_and_invalid = malloc(sizeof(int)*rep_factor);
+	input->invalidated_cnt =malloc(sizeof(int)*rep_factor);
+	input->last_onoff_state = malloc(sizeof(int)*rep_factor); 
+	input->last_valid_state = malloc(sizeof(int)*rep_factor); 
+	input->avg_time_on_while_invalid = malloc(sizeof(float)*rep_factor);
+	input->avg_time_invalid = malloc(sizeof(float)*rep_factor);
 	//input->mode_times=malloc(sizeof(int)*rep_factor);
-	if(!input->copyholders || !input->invalid_time_start || !input->valid_copies || !input->invalid_time_total)
+	if(!input->copyholders || !input->invalid_time_start || !input->valid_copies )
 		return -1;
 	for(i=0;i<rep_factor;i++)
-	{	input->valid_copies[i]=1;
+	{	input->valid_copies[i]=0;
 		input->invalid_time_start[i]=0;
-		input->invalid_time_total[i]=0;
+		input->on_while_invalid_cnt[i]=0;
+		input->time_on_and_invalid[i]=0;
+		input->invalidated_cnt[i]=0;
+		input->last_onoff_state[i]=0;
+		input->last_valid_state[i]=1;
+		input->avg_time_invalid[i]=0;
+		input->avg_time_on_while_invalid[i]=0;
 	}
+	make_lock(new_lock,ID,input->owner,rep_factor);
+	input->data_lock=new_lock; 
 	return 0;
 }
 
@@ -124,8 +161,15 @@ int free_data(data *data_in)
 {	free(data_in->copyholders);
 	free(data_in->valid_copies);
 	free(data_in->invalid_time_start);
-	free(data_in->invalid_time_total);
 	free(data_in->mod_times);
+	free(data_in->on_while_invalid_cnt);
+	free(data_in->time_on_and_invalid);
+	free(data_in->invalidated_cnt);
+	free(data_in->avg_time_invalid);
+	free(data_in->avg_time_on_while_invalid);
+	free(data_in->last_onoff_state);
+	free(data_in->last_valid_state);
+	free_lock(data_in->data_lock);
 	return 0; 
 }
 int *copyfinder(int num_nodes, int rep_factor, int owner)
@@ -226,10 +270,13 @@ int remove_write(node *input,write *remove)
 //This function sets up the new write monitoring node... It has j as and index into the 
 //array, 
 int new_write_monitoring(int j, node *nodes, data *content, double global_time)
-{	write *new=malloc(sizeof(write));
+{	int i;
+	write *new=malloc(sizeof(write));
 	(nodes+j)->Hits+=1;
 	(nodes+j)->Total+=1;
 	content->num_writers++; //Basically increment the most up-to-date version number
+	for(i=0;i<content->rep_factor;i++)
+		content->invalid_time_start[i]=global_time;
 	if(!new)
 		return -1;
 	make_write(new,content->ID, content->num_writers, content->rep_factor);
