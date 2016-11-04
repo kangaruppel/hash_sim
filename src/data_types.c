@@ -1,22 +1,33 @@
 #include "hash_sim.h"
 
-int make_lock(lock *new_lock,int ID, int owner, int rep_factor)
+int make_lock(lock *new_lock,int ID, int owner, int rep_factor, int *copyholders)
 {	int i; 
 	new_lock->locked=0; 
+	new_lock->num_stakeholders=rep_factor;
 	new_lock->ID=ID;
 	new_lock->owner=owner;
-	new_lock->holder=owner;
-	new_lock->stakeholders=malloc(sizeof(int)*rep_factor);
+	new_lock->holder=-1;
+	new_lock->version=-1; 
+	new_lock->stakeholders_acked=malloc(sizeof(int)*rep_factor);
+	new_lock->stakeholders_released=malloc(sizeof(int)*rep_factor);
+	new_lock->stakeholder_versions=malloc(sizeof(int)*rep_factor); 
+	new_lock->stakeholders=copyholders;
+	for(i=0;i<rep_factor;i++)
+	{	new_lock->stakeholders_acked[i]=0;
+		new_lock->stakeholders_released[i]=1;
+		new_lock->stakeholder_versions[i]=-1;
+	}
 	if(!new_lock->stakeholders)
 		return -1;
-	for(i=0;i<rep_factor;i++)
-		new_lock->stakeholders[i]=0;
 	return 0; 
 }
 
 int free_lock(lock *lock_in)
 {	free(lock_in->stakeholders);
-	free(lock_in);
+	free(lock_in->stakeholders_acked);
+	free(lock_in->stakeholders_released);
+	free(lock_in->stakeholder_versions);
+	free(lock_in); 
 	return 0; 
 }
 
@@ -66,6 +77,50 @@ int add_query(node *input,message *new_request)
 	return 0; 
 }
 
+//pos=0 && relative!=NULL : add after relative
+//pos=1 && relative!=NULL : add before relative
+//relative==NULL, add at the number'th' position
+int add_query_special(node *input,message *new_request,message *relative, int pos, int number)
+{	message *cur, *prev; 
+	int i; 
+	if(!relative)//adding by position
+	{	if(number==0)
+			add_query(input,new_request); //standard head insertion
+		else
+		{	for(cur=input->Queue, i=0; i<number, cur; i++, cur=cur->next)
+				prev=cur;
+			prev->next=new_request;
+			new_request->next=cur; 
+		} 
+	}
+	else//adding based on another node in the queue
+	{	if(relative==input->Queue)
+		{	if(pos)//adding before head
+			{	new_request->next=input->Queue;
+				input->Queue=new_request;
+			}
+			else//adding after head
+			{	new_request->next=input->Queue->next;
+				input->Queue->next=new_request; 
+			}
+		}
+		else
+		{	for(cur=input->Queue;cur!=relative && cur->next;cur=cur->next)
+				prev=cur;
+			if(cur!=relative)
+				return -1;
+			if(pos)//adding before
+			{	new_request->next=cur;
+				prev->next=new_request; 
+			}
+			else//adding after
+			{	new_request->next=cur->next;
+				cur->next=new_request;
+			}
+		}	
+	}
+	return 0;
+}
 //Remove head of request queue list and frees that memory
 int remove_query(node *input,message *remove)
 {	message *trash, *cur, *prev; 
@@ -86,6 +141,30 @@ int remove_query(node *input,message *remove)
 	}
 
 	free(trash);
+	return 0; 
+}
+
+//Find a pending lock release query to a certain value and get rid of it
+//since the value was locked again. 
+int remove_lock_release_notice(node *input,int ID)
+{	message *trash, *cur, *prev; 
+	//printf("Removing %i %i %i from %i\n",remove->content->ID,remove->content->owner, remove->message_type, input->ID);
+	cur=input->Queue;
+	prev=input->Queue;
+	if(input->Queue->content->ID == ID &&(input->Queue->message_type== SEND_LOCK_RELEASE || input->Queue->message_type== LOCK_RELEASE)) //head of list
+	{	trash=input->Queue;
+		input->Queue=input->Queue->next;
+	}
+	else
+	{	for(cur=input->Queue;((cur->message_type!=SEND_LOCK_RELEASE || input->Queue->message_type== LOCK_RELEASE)&& cur->content->ID!=ID) && cur; cur=cur->next)
+			prev=cur;
+		if(cur)
+		{	prev->next=cur->next;
+			trash=cur;
+		}
+	}
+	if(trash)
+		free(trash);
 	return 0; 
 }
 
@@ -152,7 +231,7 @@ int make_data(data *input, int ID, int num_nodes, int rep_factor)
 		input->avg_time_invalid[i]=0;
 		input->avg_time_on_while_invalid[i]=0;
 	}
-	make_lock(new_lock,ID,input->owner,rep_factor);
+	make_lock(new_lock,ID,input->owner,rep_factor, input->copyholders);
 	input->data_lock=new_lock; 
 	return 0;
 }
@@ -199,6 +278,14 @@ int is_copyholder(data *input, int dut)
 	return -1; 
 }
 
+int is_stakeholder(lock *input, int dut)
+{	int i; 
+	for(i=0;i<input->num_stakeholders;i++)
+	{	if(dut==input->stakeholders[i])
+			return i; 
+	}
+	return -1;
+}
 /*int is_writer(data *input, int dut)
 {	int i; 
 	for(i=0;i<input->num_writers;i++)

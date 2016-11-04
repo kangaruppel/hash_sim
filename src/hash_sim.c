@@ -8,13 +8,24 @@ int pass_out_data(data *input,int num_nodes, int rep_factor, int namespace_size)
 }
 
 int build_node_arr(node *input, int num_nodes, int namespace_size, int num_requests, float write_prob, data *data_arr )
-{	int i, j, z;
-	message *requests, *cur;
+{	int i, j, z,entry,ID;
+	message *requests, *cur, *lock_message;
+	data *stuff; 
 	for(i=0;i<num_nodes;i++) 
 	{	//printf("Node %i: \n",i);
 		requests=build_request_list(num_requests,namespace_size,data_arr,write_prob,i);
 		make_node(input+i,i,requests);
-		//for(cur=(input+i)->Queue;cur;cur=cur->next)
+		if(LOCKS_ON)
+		{	for(j=0;j<num_requests*write_prob*.25;j++)
+			{	entry=rand()%(num_requests+j);
+				ID=rand()%namespace_size;
+				lock_message=malloc(sizeof(message));
+				stuff=malloc(sizeof(data));
+				stuff=data_arr+ID;
+				make_message(lock_message,i,LOCK_REQ,stuff,NULL);
+				add_query_special(input+i,lock_message,NULL, 0,entry);
+			}
+		}//for(cur=(input+i)->Queue;cur;cur=cur->next)
 		//	printf("%5d \t %5d \t %5d \t \n", cur->content->ID, cur->content->owner, cur->message_type);		
 	}
 	
@@ -22,9 +33,10 @@ int build_node_arr(node *input, int num_nodes, int namespace_size, int num_reque
 }
 
 message * build_request_list(int num_requests, int namespace_size, data *data_arr, float write_prob, int sender)
-{	int i, message_type;
+{	int i, message_type,pos;
 	data *data_addr;
 	message *new, *head;
+	int num_locks=num_requests*.25*write_prob; 
 	head=malloc(sizeof(message));
 	data_addr=data_arr+(rand()%namespace_size);
 	message_type=(rand()%100)>(write_prob*100);
@@ -129,7 +141,7 @@ void shuffle(int *array, size_t n)
 }
 
 
-long process_requests(int **on_mat,node *nodes, data *data_arr, int num_nodes, int timesteps, int namespace_size)
+long process_requests(int **on_mat,node *nodes, data *data_arr, int num_nodes, int timesteps, int namespace_size, float *peak_staleness)
 {	int i, j, k, done=0,num_tried, turnovers=1, on=0, summed=0, num_on=0, on_index;
 	long time_to_finish=0;
 	int *nodes_on=malloc(sizeof(int)*num_nodes); 
@@ -234,6 +246,8 @@ long process_requests(int **on_mat,node *nodes, data *data_arr, int num_nodes, i
 		}*/
 		done=all_queues_empty(nodes,num_nodes);
 		intermed=staleness_checker(data_arr,namespace_size,time_to_finish, on_row); 
+		if(intermed> *peak_staleness)
+			*peak_staleness=intermed;
 		if(intermed<0)
 			printf("Wrong wrong wrong!!\n\n");
 		stale_timelog[time_to_finish]=intermed;
@@ -292,48 +306,37 @@ float read_off_queue(int j, data *data_arr, node *nodes, int *on_row, double  gl
 	int i,k, flag=1, sum_valid=0, extra, copy_index=-1, writer_index, copy_index2=-1;
 	float time=0; 
 	write *cur_write;
+	lock *cur_lock=packet->content->data_lock;
 	for(i=0;i<packet->content->rep_factor;i++)
 		copyholders[i]=packet->content->copyholders[i];
 	for(i=0;i<num_nodes;i++)
 		avail_row[i]=on_row[i];
+	//Only applies if j is a stakeholder for this lock... otherwise the other nodes
+	//have to deal with the fact that some node is trying to get at locked data. 
+	i=is_stakeholder(cur_lock,j);
+	if(i>0 &&(cur_lock->locked || !cur_lock->stakeholders_released[i]) && cur_lock->holder!=j && packet->message_type<5) //for now we're not doing any dynamic reordering, so this just blocks...
+	{	time=.01;
+		return time;
+	}
 	switch(packet->message_type)
-	{	case 0: //Schedule a write
-			//Check if it's a writer already.
-			/*writer_index=is_writer(packet->content, j);
-			if(writer_index>-1)
-				writer=1;
-			//Check if we can make it a writer, and do so if allowed
-			else if(packet->content->num_writers<WRITER_LEVEL)
-			{	packet->content->num_writers++; 	
-				packet->content->writers=realloc(packet->content->writers,packet->content->num_writers*sizeof(int));
-				packet->content->writers[padisp cket->content->num_writers-1]=j; 
-				writer=1;
-			}*/
+	{	case WRITE: //Schedule a write
 			if(MULTI_WRITER==ALL)
 				writer=1;
 			else if(MULTI_WRITER==COPIES)
 			{	//Figure out if this node is a copy holder
 				copy_index=is_copyholder(packet->content,j);
 				if(copy_index>=0)
-				{	writer=1;
-					//on_row[j]=1; //for the purpose of treating it like a normal copy 
-				}
+					writer=1;
 			}
 			if(j==owner)
-			{	writer=1;
-				//on_row[j]=1; //again, so it can be treated like a normal copy
-			}
-			//packet->content->num_writers++; //increment number of writers of this data (ever), used for versions
-			//If the node is allowed to write it... FYI, it'll also get responsibility for updating
+				writer=1;
 			if(writer)
 			{	time=.01;
 				//Do set up for a new write, includes incrementing hits
 				new_write_monitoring(j, nodes,packet->content, global_time);
 				if((nodes+j)->Active_writes==0)
 					printf("Look, ya screwed up here too!\n");
-				
 				//check if there's time to send the update
-				
 				flag=0;
 				cur_write=(nodes+j)->Active_writes;
 				if(rep_factor>1)
@@ -351,28 +354,20 @@ float read_off_queue(int j, data *data_arr, node *nodes, int *on_row, double  gl
 					}
 					time=1; //need to change later if we aren't forcing this to take priority!!
 				}
-				//sum_valid=1;
 				sum_valid=0;
-
 				if(flag) //if sending off node 
 				{	//check in with ALL the copyholders, but ignore the ones who already ack'd
 					for(i=0;i<rep_factor;i++) //TODO: package into a function!!!
 					{	if(on_row[copyholders[i]] && !cur_write->copies_acked[i]) //one of the copies is on and it hasn't acked
 						{	cur_write->copies_acked[i]=1;
-							//(data_arr+ID)->valid_copies[i]=cur_write->version;
-							//(data_arr+ID)->invalid_time_total[i]=0; //since it was on when someone first issued a write
-							//(data_arr+ID)->invalid_time_start[i]=0; //reset
 							on_row[copyholders[i]]=0;
 							if(copyholders[i]==j) //skip the ack message since it's local
 							{	(data_arr+ID)->valid_copies[i]=cur_write->version;
 								continue;
 							}
 							new_packet=malloc(sizeof(message));
-							make_message(new_packet,j, 2,packet->content,NULL); //notify of update
-							add_query(nodes+copyholders[i],new_packet);
-							//avail_row[copyholders[i-1]]=0;
-							//on_row[copyholders[i]]=0; //<-- replaced line above as a test.... 10-16-16
-							
+							make_message(new_packet,j, UPDATE,packet->content,NULL); //notify of update
+							add_query(nodes+copyholders[i],new_packet);				
 						}
 						
 					}
@@ -384,11 +379,9 @@ float read_off_queue(int j, data *data_arr, node *nodes, int *on_row, double  gl
 					sum_valid++;
 				}
 				//sum_valid=0;
-				
-				if(sum_valid<rep_factor) //Add update packet
+				if(sum_valid<rep_factor) //Add send update packet
 				{	new_packet=malloc(sizeof(message));
-					make_message(new_packet,j,4,packet->content,NULL); //************4 ADDED HERE*************************//
-					//remove_query(nodes+j,packet);
+					make_message(new_packet,j,SEND_UPDATES,packet->content,NULL); 
 					add_query(nodes+j,new_packet);
 					if((nodes+j)->Active_writes==0)
 						printf("Womp... Error\n");
@@ -409,31 +402,17 @@ float read_off_queue(int j, data *data_arr, node *nodes, int *on_row, double  gl
 				}
 				flag=0; 
 				time=1;
-				/*	for(k=0;k<packet->content->num_writers;k++)
-				{	if(on_row[packet->content->writers[k]])
-					{	writer=1; //all right, i'm reusing this boolean again, so sue me
-						owner=packet->content->writers[k];
-						break;	
-					}
-				}*/
 				for(i=0;i<rep_factor;i++)
 				{	if(!MULTI_WRITER && i>0)
 						break;
 					if(on_row[copyholders[i]]==1) //some copyholder is on, TODO: randomize this!!
-					{	//new_write_monitoring(owner, nodes,packet->content, global_time);
-						new_packet=malloc(sizeof(message));
-						make_message(new_packet,j,0,packet->content,NULL); //need to throw 0 packet on there!!
+					{	new_packet=malloc(sizeof(message));
+						make_message(new_packet,j,WRITE,packet->content,NULL); //need to throw 0 packet on there!!
 						add_query(nodes+copyholders[i],new_packet); //I shouldn't be leaving "owner" here b/c it's not strictly correct...
-				//		cur_write=(nodes+owner)->Active_writes;
-			//			cur_write->copies_acked[0]=1;
-					//	(data_arr+ID)->valid_copies[0]=cur_write->version;
-					//	(data_arr+ID)->invalid_time_total[0]=0; //since it was on when someone first issued a write
-					//	(data_arr+ID)->invalid_time_start[0]=0; //reset
 						(nodes+j)->Hits+=1;
 						(nodes+j)->Total+=1;
 						(nodes+copyholders[i])->Acks++;
 						(nodes+copyholders[i])->Total++; 
-						//avail_row[owner]=0; 
 						on_row[copyholders[i]]=0;
 						remove_query(nodes+j,packet);
 						flag=1;
@@ -444,11 +423,10 @@ float read_off_queue(int j, data *data_arr, node *nodes, int *on_row, double  gl
 				{	//remove_query(nodes+j,packet);
 					(nodes+j)->Misses++;
 					(nodes+j)->Total++;
-				}
-				
+				}	
 			}
 			break;
-		case 1: //Interpret a read 
+		case READ: //Interpret a read 
 			flag=0;
 			for(i=0;i<rep_factor;i++)
 			{	if(copyholders[i]==j)
@@ -456,8 +434,6 @@ float read_off_queue(int j, data *data_arr, node *nodes, int *on_row, double  gl
 					break;
 				}
 			}
-			//if(owner==j) //can probably get rid of this...
-			//	flag=1;
 			if(flag) //Local read
 			{	time=.01;
 				remove_query(nodes+j,packet);
@@ -472,12 +448,11 @@ float read_off_queue(int j, data *data_arr, node *nodes, int *on_row, double  gl
 				}
 				time=1;
 				flag=0;
-				for(i=0;i<rep_factor;i++) //check for any copyholders that are on. 
-				{	if(on_row[copyholders[i]]) //TODO: randomize this too
+				for(i=0;i<rep_factor;i++) //check for any copyholders that are on with released locks on the data. 
+				{	if(on_row[copyholders[i]] && cur_lock->stakeholders_released[i]) //TODO: randomize this too
 					{	new_packet=malloc(sizeof(message));
-						make_message(new_packet,j,3,packet->content,NULL); //notify of update
+						make_message(new_packet,j,READ_ACK,packet->content,NULL); //notify of update
 						add_query(nodes+copyholders[i],new_packet);
-						//avail_row[copyholders[i-1]]=0;
 						on_row[copyholders[i]]=0;
 						remove_query(nodes+j,packet);
 						(nodes+j)->Hits++;
@@ -491,19 +466,13 @@ float read_off_queue(int j, data *data_arr, node *nodes, int *on_row, double  gl
 					(nodes+j)->Total++;		
 				}
 			}
-			//do valid check here!!!!!!!!!!!!!!
-			//if(owner==j)//this node is the data owner
-			//	i=0;
-			//else
-			//for(i=0;i<rep_factor, copyholders[i]!=j;i++);	//run through copies and find the index of this node
-			
 			//since we broke both of the prior for loops and haven't touched i since... 
 			if(flag)
 			{	if((data_arr+ID)->valid_copies[i]!=(data_arr+ID)->num_writers)	
 					(data_arr+ID)->invalid_accesses++;
 			}
 			break;
-		case 2: //scheduling consistency update
+		case UPDATE: //scheduling consistency update
 			if(total_time>0)//--> REALLY shouldn't happen... 
 			{	free(avail_row);
 				free(copyholders);
@@ -513,11 +482,7 @@ float read_off_queue(int j, data *data_arr, node *nodes, int *on_row, double  gl
 			copy_index2=is_copyholder(packet->content,packet->sender);
 			if(copy_index>-1)//if j is a copyholder and it's getting updated
 			{	if((data_arr+ID)->valid_copies[copy_index]<(data_arr+ID)->valid_copies[copy_index2] || NEWER_WRITE_NOT_REQ)
-				{	//Only update if receiving node's copy is older
-					//(nodes+j)->Updates++;
-					//(nodes+j)->Total++;
-					//(nodes+j)->
-					(data_arr+ID)->valid_copies[copy_index]=(data_arr+ID)->valid_copies[copy_index2];
+				{	(data_arr+ID)->valid_copies[copy_index]=(data_arr+ID)->valid_copies[copy_index2];
 				}
 			}
 			remove_query(nodes+j,packet);
@@ -525,7 +490,7 @@ float read_off_queue(int j, data *data_arr, node *nodes, int *on_row, double  gl
 			(nodes+j)->Total++;
 			time=1;
 			break;
-		case 3: //read ack
+		case READ_ACK: //read ack
 			if(total_time>0)//--> again, REALLY shouldn't happen
 			{	free(avail_row);
 				free(copyholders);
@@ -536,7 +501,7 @@ float read_off_queue(int j, data *data_arr, node *nodes, int *on_row, double  gl
 			(nodes+j)->Total++;
 			time=1;
 			break;
-		case 4: 
+		case SEND_UPDATES: 
 			if(total_time>0)
 			{	free(avail_row);
 				free(copyholders);
@@ -560,18 +525,13 @@ float read_off_queue(int j, data *data_arr, node *nodes, int *on_row, double  gl
 				{	cur_write->copies_acked[i]=1;
 					if((data_arr+ID)->valid_copies[i]<cur_write->version) //To ensure that a newer update isn't overwritten. 
 						(data_arr+ID)->valid_copies[i]=cur_write->version;
-					//(data_arr+ID)->invalid_time_total[i]=0; //since it was on when someone first issued a write
-					//(data_arr+ID)->invalid_time_start[i]=0; //reset
 					if(copyholders[i]==j) //skip the ack message since it's local
 						continue;	//realistically there's no way the local shouldn't already be ack'd. 
 					new_packet=malloc(sizeof(message));
-					make_message(new_packet,j,2,packet->content,NULL); //notify of update
+					make_message(new_packet,j,UPDATE,packet->content,NULL); //notify of update
 					add_query(nodes+copyholders[i],new_packet);
-					//avail_row[copyholders[i-1]]=0;
-					on_row[copyholders[i]]=0; //<-- replaced line above as a test.... 10-16-16
-					
-				}
-				
+					on_row[copyholders[i]]=0; 
+				}	
 			}
 			sum_valid=0;
 			for(i=0;i<rep_factor;i++)
@@ -579,17 +539,301 @@ float read_off_queue(int j, data *data_arr, node *nodes, int *on_row, double  gl
 					break;
 				sum_valid++;
 			}
-			/*if(sum_valid<rep_factor) //Add packet back on -->why the heck are we bothering??? 
-			{	new_packet=malloc(sizeof(message));
-				make_message(new_packet,4,packet->content,NULL);
-				remove_query(nodes+j,packet);
-				add_query(nodes+j,new_packet);
-			}*/
 			if(sum_valid>=rep_factor) //pull active write off of the list
 			{	remove_write(nodes+j,cur_write);
 				remove_query(nodes+j,packet);
 			}
 			break;
+		case LOCK_REQ: //lock request
+			owner=cur_lock->owner;
+			if(owner!=j)//Try to get in touch with lock owner...
+			{	if(total_time>0) //don't send anything if not enough time
+				{	free(avail_row);
+					free(copyholders);
+					return 1;
+				}
+				
+				if(on_row[owner])
+				{	new_packet=malloc(sizeof(message));
+					make_message(new_packet,j,LOCK_REQ,packet->content,NULL); //need to throw 5 packet on there!!
+					add_query(nodes+owner,new_packet); //I shouldn't be leaving "owner" here b/c it's not strictly correct...
+					(nodes+j)->Hits+=1;
+					(nodes+j)->Total+=1;
+					(nodes+owner)->Acks++;
+					(nodes+owner)->Total++;  
+					on_row[owner]=0;
+					remove_query(nodes+j,packet);
+				}
+				else
+				{	(nodes+j)->Misses++;
+					(nodes+j)->Total++;
+				}
+			}
+			else //this is the owner
+			{	if(cur_lock->holder>-1 && cur_lock->holder!=packet->sender)//if someone has touched the lock
+					flag=DENIED;//DENIED signal- lock already held by another node
+				else //if data hasn't been touched or it's the lock requestor
+				{	if(cur_lock->holder<0)
+					{	cur_lock->version++;
+						cur_lock->holder=packet->sender;
+					}
+					sum_valid=0;
+					for(i=0;i<cur_lock->num_stakeholders;i++) //check if any of the stakeholders is on
+					{	if(on_row[cur_lock->stakeholders[i]] && !cur_lock->stakeholders_acked[i]) //one of the stakeholders is on and it hasn't acked
+						{	cur_lock->stakeholders_acked[i]=1;
+							on_row[cur_lock->stakeholders[i]]=0;
+							cur_lock->stakeholders_released[i]=0; //set that back to unreleased, doing it here b/c, b/c, meh it made sense at the time
+							if(cur_lock->stakeholders[i]==j)//skip ack message if local
+							{	cur_lock->stakeholder_versions[i]= cur_lock->version; 	
+								continue;
+							}
+							new_packet=malloc(sizeof(message));
+							make_message(new_packet,j, LOCK_SET_ACK,packet->content,NULL); //notify of update
+							add_query(nodes+cur_lock->stakeholders[i],new_packet);			
+						}
+					}
+					for(i=0;i<cur_lock->num_stakeholders;i++)
+					{	if(!cur_lock->stakeholders_acked[i])
+							break;
+						else
+							sum_valid++; 
+					}
+					if(sum_valid>=cur_lock->num_stakeholders)
+					{	flag=GRANTED;//GRANTED lock!! We've heard from all the stakeholders
+						cur_lock->locked=1; 
+					}
+					else
+					{	flag=PENDING;//PENDING... now we're going to go notify the rest of the stakeholders
+						new_packet=malloc(sizeof(message));
+						make_message(new_packet,j,SEND_LOCK_SET,packet->content,NULL); //send back a DENIED status for the lock request
+						add_query(nodes+j,new_packet); 
+					}
+					
+				}
+				
+				new_packet=malloc(sizeof(message));
+				make_message(new_packet,j,flag,packet->content,NULL); //send back a DENIED status for the lock request
+				add_query(nodes+packet->sender,new_packet);
+				remove_query(nodes+j,packet);
+			
+			}
+			break; 
+		case DENIED:	//BUSY
+			if(total_time>0)//--> again, REALLY shouldn't happen
+			{	free(avail_row);
+				free(copyholders);
+				return 1;
+			}
+			new_packet=malloc(sizeof(message));
+			make_message(new_packet,j,LOCK_REQ,packet->content,NULL); //Keep asking... for now
+			add_query(nodes+j,new_packet); 
+			remove_query(nodes+j,packet);
+			(nodes+j)->Acks++;
+			(nodes+j)->Total++;
+			time=1;
+			break;
+		case PENDING: //PENDING
+			if(total_time>0)//--> again, REALLY shouldn't happen
+			{	free(avail_row);
+				free(copyholders);
+				return 1;
+			}
+			new_packet=malloc(sizeof(message));
+			make_message(new_packet,j,LOCK_REQ,packet->content,NULL); //Keep asking... for now
+			add_query(nodes+j,new_packet); 
+			remove_query(nodes+j,packet);
+			(nodes+j)->Acks++;
+			(nodes+j)->Total++;
+			time=1;
+			break;
+		case GRANTED: //GRANTED
+			if(total_time>0)//--> again, REALLY shouldn't happen
+			{	free(avail_row);
+				free(copyholders);
+				return 1;
+			}
+			//Clear out stakeholder ack's so things don't get screwed up release
+			for(i=0;i<cur_lock->num_stakeholders;i++)
+				cur_lock->stakeholders_acked[i]=0;
+			remove_query(nodes+j,packet);
+			new_packet=malloc(sizeof(message));
+			make_message(new_packet,j,LOCK_RELEASE,packet->content,NULL);
+			add_query(nodes+j,new_packet);//TODO: Take this out later!!!!!
+			(nodes+j)->Acks++;
+			(nodes+j)->Total++;
+			time=1;
+			break;
+		case LOCK_SET_ACK: //sent to a node that heard lock set and replied
+			if(total_time>0)//--> again, REALLY shouldn't happen
+			{	free(avail_row);
+				free(copyholders);
+				return 1;
+			}
+			i=is_stakeholder(cur_lock,j);
+			if(i<0)
+				printf("Error!!!!\n");
+			//Pull off any lock releases running around for the same holder
+			cur_lock->stakeholder_versions[i]= cur_lock->version; //update version
+			remove_lock_release_notice(nodes+j,packet->content->ID);
+			remove_query(nodes+j,packet);
+			(nodes+j)->Updates++;
+			(nodes+j)->Total++;
+			time=1;
+			break;
+		case SEND_LOCK_SET: //Hunting for ack's, but we don't report to lock requestor
+			if(total_time>0)//--> again, REALLY shouldn't happen
+			{	free(avail_row);
+				free(copyholders);
+				return 1;
+			}
+			sum_valid=0;
+			for(i=0;i<cur_lock->num_stakeholders;i++) //check if any of the stakeholders is on
+			{	if(on_row[cur_lock->stakeholders[i]] && !cur_lock->stakeholders_acked[i]) //one of the stakeholders is on and it hasn't acked
+				{	cur_lock->stakeholders_acked[i]=1;
+					on_row[cur_lock->stakeholders[i]]=0;
+					if(cur_lock->stakeholders[i]==j)//skip ack message if local
+					{	cur_lock->stakeholder_versions[i]= cur_lock->version; 		
+						continue;
+					}
+					new_packet=malloc(sizeof(message));
+					make_message(new_packet,j, LOCK_SET_ACK,packet->content,NULL); //notify of update
+					add_query(nodes+cur_lock->stakeholders[i],new_packet);	
+				}
+			}
+			for(i=0;i<cur_lock->num_stakeholders;i++)
+			{	if(!cur_lock->stakeholders_acked[i])
+					break;
+				else
+					sum_valid++; 
+			}
+			if(sum_valid<cur_lock->num_stakeholders) //Keep looking
+			{	new_packet=malloc(sizeof(message));
+				make_message(new_packet,j,SEND_LOCK_SET,packet->content,NULL); //send back a DENIED status for the lock request
+				add_query(nodes+j,new_packet);
+				remove_query(nodes+j,packet);
+			}
+			else
+				cur_lock->locked=1;
+			break; 
+		case LOCK_RELEASE: //Let it go, let it go can't hold it back anymore... 
+			if(is_stakeholder(cur_lock,j)<0)//if it isn't a stakeholder, go find one
+			{	if(total_time>0) //don't send anything if not enough time
+					{	free(avail_row);
+						free(copyholders);
+						return 1;
+					}
+					flag=0; 
+					time=1;
+					for(i=0;i<cur_lock->num_stakeholders;i++)
+					{	if(on_row[cur_lock->stakeholders[i]]==1) //some copyholder is on, TODO: randomize this!!
+						{	new_packet=malloc(sizeof(message));
+							make_message(new_packet,j,LOCK_RELEASE,packet->content,NULL); //need to throw 0 packet on there!!
+							add_query(nodes+cur_lock->stakeholders[i],new_packet); //I shouldn't be leaving "owner" here b/c it's not strictly correct...
+							(nodes+j)->Hits+=1;
+							(nodes+j)->Total+=1;
+							(nodes+copyholders[i])->Acks++;
+							(nodes+copyholders[i])->Total++; 
+							on_row[copyholders[i]]=0;
+							remove_query(nodes+j,packet);
+							flag=1;
+							break;
+						}
+					}
+					if(!flag)//meaning we didn't get a hold of any copies 
+					{	(nodes+j)->Misses++;
+						(nodes+j)->Total++;
+					}	
+			}
+			else //is a stakeholder, now has to go tell everybody else about lock...
+			{	if(cur_lock->holder!=packet->sender) //if node other than owner tries to release lock, decline to aquiesce to the request... means no
+				{	new_packet=malloc(sizeof(message));
+					make_message(new_packet,j,DENIED,packet->content,NULL); //need to throw 0 packet on there!!
+					add_query(nodes+packet->sender,new_packet); //I shouldn't be leaving "owner" here b/c it's not strictly correct...
+					remove_query(nodes+j,packet);		
+					free(copyholders);
+					free(avail_row);
+					return time; 
+				}
+				cur_lock->locked=0;
+				if(j==cur_lock->owner)//clear holder & stakeholder acks if this is the owner... 
+				{	cur_lock->holder=-1;
+					for(i=0;i<cur_lock->num_stakeholders;i++)
+						cur_lock->stakeholders_acked[i]=0; 
+				}
+				sum_valid=0;
+				//Run through stakeholders and try to tell them it's released.
+				for(i=0;i<cur_lock->num_stakeholders;i++) //check if any of the stakeholders is on
+				{	if(on_row[cur_lock->stakeholders[i]] && !cur_lock->stakeholders_released[i]) //one of the stakeholders is on and it hasn't been released
+					{	on_row[cur_lock->stakeholders[i]]=0;
+						cur_lock->stakeholders_released[i]=1; //set that back to released, doing it here b/c, b/c, meh it made sense at the time
+						if(cur_lock->stakeholders[i]==j)//skip ack message if local
+							continue;
+						new_packet=malloc(sizeof(message));
+						make_message(new_packet,j, LOCK_RELEASE_ACK,packet->content,NULL); //notify of update
+						add_query(nodes+cur_lock->stakeholders[i],new_packet);			
+					}
+				}
+				for(i=0;i<cur_lock->num_stakeholders;i++)
+				{	if(!cur_lock->stakeholders_released[i])
+						break;
+					else
+						sum_valid++; 
+				}
+				if(sum_valid<cur_lock->num_stakeholders)
+				{	new_packet=malloc(sizeof(message));
+					make_message(new_packet,j,SEND_LOCK_RELEASE,packet->content,NULL); //send back a DENIED status for the lock request
+					add_query(nodes+j,new_packet); 		
+				}
+				remove_query(nodes+j,packet);
+			}
+			break; 
+		case SEND_LOCK_RELEASE:
+			if(total_time>0)//--> again, REALLY shouldn't happen
+			{	free(avail_row);
+				free(copyholders);
+				return 1;
+			}
+			sum_valid=0;
+			for(i=0;i<cur_lock->num_stakeholders;i++) //check if any of the stakeholders is on
+			{	if(on_row[cur_lock->stakeholders[i]] && !cur_lock->stakeholders_released[i]) //one of the stakeholders is on and it hasn't acked
+				{	cur_lock->stakeholders_released[i]=1;
+					on_row[cur_lock->stakeholders[i]]=0;
+					if(cur_lock->stakeholders[i]==j)//skip ack message if local
+								continue;
+					new_packet=malloc(sizeof(message));
+					make_message(new_packet,j, LOCK_RELEASE_ACK,packet->content,NULL); //notify of update
+					add_query(nodes+cur_lock->stakeholders[i],new_packet);	
+				}
+			}
+			for(i=0;i<cur_lock->num_stakeholders;i++)
+			{	if(!cur_lock->stakeholders_released[i])
+					break;
+				else
+					sum_valid++; 
+			}
+			if(sum_valid<cur_lock->num_stakeholders) //Keep looking
+			{	new_packet=malloc(sizeof(message));
+				make_message(new_packet,j,SEND_LOCK_RELEASE,packet->content,NULL); //send back a DENIED status for the lock request
+				add_query(nodes+j,new_packet);
+				remove_query(nodes+j,packet);
+			}
+			break;
+		case LOCK_RELEASE_ACK:
+			if(total_time>0)//--> again, REALLY shouldn't happen
+			{	free(avail_row);
+				free(copyholders);
+				return 1;
+			}
+			i=is_stakeholder(cur_lock,j);
+			flag=is_stakeholder(cur_lock,packet->sender);
+			if(i<0)
+				printf("Error!!!!\n");
+			//if sti
+			if(cur_lock->stakeholder_versions[i] != cur_lock->stakeholder_versions[flag])
+				remove_lock_release_notice(nodes+packet->sender,packet->content->ID);
+			if(packet)
+				remove_query(nodes+j,packet);
+			break; 
 		default: 
 			printf("Something screwed up really badly!!!\n");
 			exit(0);

@@ -45,7 +45,9 @@ Notes:
 	grants that lock. 
 		The whole simulator is built on a static input of on/off data, meaning that energy management policies, 
 	such as idling while waiting for lock replies, etc, are going to be lost... so it goes. 
-	
+		Assume that when a node receives a lock notification, if it is updating the data getting locked, it will 
+	send a notice back to the locking node with the updated data. This prevents the possibility of multiple data 
+	versions floating around when data is locked. 
 	
 Optimizations: 
 		All nodes in listening range could forward the lock and release messages a couple of 

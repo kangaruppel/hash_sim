@@ -5,12 +5,33 @@
 #define ALL 1
 #define COPIES 2
 
+
+#define WRITE 0
+#define READ 1
+#define UPDATE 2
+#define READ_ACK 3
+#define SEND_UPDATES 4
+#define LOCK_REQ 5
+#define DENIED 6
+#define PENDING 7
+#define GRANTED 8
+#define LOCK_SET_ACK 9
+#define SEND_LOCK_SET 10
+#define LOCK_RELEASE 11
+#define SEND_LOCK_RELEASE 12
+#define LOCK_RELEASE_ACK 13
+
 typedef struct lock_{
 	int locked;
 	int ID;
 	int owner;
 	int holder;
+	int num_stakeholders;
+	int version;
+	int *stakeholder_versions;
 	int *stakeholders;
+	int *stakeholders_acked;
+	int *stakeholders_released;
 }lock;
 
 typedef struct data_{
@@ -79,7 +100,7 @@ int pass_out_data(data *, int, int, int);
 int is_copyholder(data *input, int dut);
 //int is_writer(data *input, int dut);
 
-long process_requests(int **, node *, data *, int, int, int);
+long process_requests(int **, node *, data *, int, int, int, float *);
 float read_off_queue(int, data *, node *, int *, double, float, int);
 int all_queues_empty(node *, int);
 float staleness_checker(data *, int, int, int *);
@@ -90,4 +111,7 @@ int RETRY_LEVEL;
 int MULTI_WRITER;
 int FINISH_ALL_UPDATES;
 int NEWER_WRITE_NOT_REQ;
+int RAND_SEED;
+int LOCKS_ON; 
 FILE *STALE_OUTPUT_FILE; 
+FILE *STAT_OUTPUT_FILE;

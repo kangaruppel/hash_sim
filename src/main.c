@@ -7,7 +7,7 @@ int main(int argc, char *argv[])
 	int  num_nodes, num_requests=1000, namespace_size=1000, rep_factor, time_outsteps=1;
 	int hits, misses, updates, acks, total, invalid_accesses;
 	int **on_mat;
-	float write_probability=.25;
+	float write_probability=.25, peak_staleness=0;
 	char test,junk;
 	int i=0, j=0, test2;
 	long time_out=0;
@@ -20,6 +20,9 @@ int main(int argc, char *argv[])
 	FINISH_ALL_UPDATES=1;
 	NEWER_WRITE_NOT_REQ=0;
 	STALE_OUTPUT_FILE=fopen("stale_output.txt","a");
+	STAT_OUTPUT_FILE=fopen("stat_output.txt","a");
+	RAND_SEED=time(NULL);
+	LOCKS_ON=0; 
 	if(argc < 2)
 	{	fprintf(stderr, "Not enough input arguments!", -1);
 		return -1; 
@@ -52,9 +55,21 @@ int main(int argc, char *argv[])
 					NEWER_WRITE_NOT_REQ=atoi(argv[i+1]);
 					break; 
 				case 'f': //writing to a different file
-					fclose(STALE_OUTPUT_FILE);
-					STALE_OUTPUT_FILE=fopen(argv[i+1],"a");
+					if(argv[i][2] == 's')
+					{	fclose(STALE_OUTPUT_FILE);
+						STALE_OUTPUT_FILE=fopen(argv[i+1],"a");
+					}
+					else
+					{	fclose(STAT_OUTPUT_FILE);
+						STAT_OUTPUT_FILE=fopen(argv[i+1],"a");
+					}
 					break;
+				case 's': //seed for random number generator
+					RAND_SEED=atoi(argv[i+1]);
+					break;
+				case 'l': //turning locks on 
+					LOCKS_ON=atoi(argv[i+1]);
+					break; 
 			}
 			
 		}
@@ -62,7 +77,7 @@ int main(int argc, char *argv[])
 	}
 	fprintf(STALE_OUTPUT_FILE,"-----------Run at %s--------------\n",asctime(timeinfo));
 	//srand(3658);
-	srand(50183);
+	srand(RAND_SEED);
 	//srand(time(NULL));
 	//printf("Enter number of requests, namespace size, replication factor, and write probability.\n");
 	//scanf("%i %i %i %f", &num_requests,&namespace_size,&rep_factor, &write_probability);
@@ -113,7 +128,7 @@ int main(int argc, char *argv[])
 	pass_out_data(data_arr,num_nodes,rep_factor,namespace_size);
 	node *node_arr=malloc(sizeof(node)*num_nodes);
 	build_node_arr(node_arr, num_nodes, namespace_size,num_requests, write_probability, data_arr);
-	time_out=process_requests(on_mat,node_arr,data_arr,num_nodes,time_outsteps,namespace_size);
+	time_out=process_requests(on_mat,node_arr,data_arr,num_nodes,time_outsteps,namespace_size, &peak_staleness);
 	
 	hits=0;misses=0;updates=0;acks=0;total=0;
 	for(i=0;i<num_nodes;i++)
@@ -124,15 +139,22 @@ int main(int argc, char *argv[])
 		total+=(node_arr+i)->Total;
 	}
 	invalid_accesses=0;
+	fprintf(STAT_OUTPUT_FILE,"Copy # | Invalidated Cnt | Avg Time Invalid | Avg Time Invalid & On \n");
 	for(i=0;i<namespace_size;i++)
 	{	invalid_accesses+=(data_arr+i)->invalid_accesses;
 		printf("----------Variable %i, Written %i Times, Invalid Accesses %i----------\n",i, (data_arr+i)->num_writers, (data_arr+i)->invalid_accesses);
 		for(j=0;j<(data_arr+i)->rep_factor;j++)
-			printf("copy %i: Inval %i Times, Avg Time Inval: %.2f Avg Time Inval & On: %.2f \n",j,(data_arr+i)->invalidated_cnt[j],(data_arr+i)->avg_time_invalid[j],(data_arr+i)->avg_time_on_while_invalid[j]); 
+		{	printf("copy %i: Inval %i Times, Avg Time Inval: %.2f Avg Time Inval & On: %.2f \n",j,(data_arr+i)->invalidated_cnt[j],(data_arr+i)->avg_time_invalid[j],(data_arr+i)->avg_time_on_while_invalid[j]); 
+			fprintf(STAT_OUTPUT_FILE,"%7i %16i %17.2f %22.2f\n",j,(data_arr+i)->invalidated_cnt[j],(data_arr+i)->avg_time_invalid[j],(data_arr+i)->avg_time_on_while_invalid[j]); 
+		}
 	}
 	printf("time_out to finish= %d\n",time_out);
 	printf("Hits=%i\nMisses=%i\nUpdates=%i\nAcks=%i\nTotal=%i\n",hits,misses,updates,acks,total);
 	printf("Reads of invalid data: %i\n",invalid_accesses);
+	fprintf(STAT_OUTPUT_FILE,"Time to finish | Hits | Misses | Invalid Access | Peak Staleness\n %14d %5d %7d %8d %8.2f",time_out, hits, misses, invalid_accesses, peak_staleness);
+	
+	
+	fclose(STAT_OUTPUT_FILE);
 	/*rint_queue(node_arr+3);
 	printf("\n");
 	remove_query(node_arr+3,(node_arr+2)->Queue->next->next);
