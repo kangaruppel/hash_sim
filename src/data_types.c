@@ -87,7 +87,7 @@ int add_query_special(node *input,message *new_request,message *relative, int po
 	{	if(number==0)
 			add_query(input,new_request); //standard head insertion
 		else
-		{	for(cur=input->Queue, i=0; i<number, cur; i++, cur=cur->next)
+		{	for(cur=input->Queue, i=0; i<number && cur; i++, cur=cur->next)
 				prev=cur;
 			prev->next=new_request;
 			new_request->next=cur; 
@@ -148,6 +148,9 @@ int remove_query(node *input,message *remove)
 //since the value was locked again. 
 int remove_lock_release_notice(node *input,int ID)
 {	message *trash, *cur, *prev; 
+	trash=NULL; 
+	cur=NULL;
+	prev=NULL; 
 	//printf("Removing %i %i %i from %i\n",remove->content->ID,remove->content->owner, remove->message_type, input->ID);
 	cur=input->Queue;
 	prev=input->Queue;
@@ -156,8 +159,11 @@ int remove_lock_release_notice(node *input,int ID)
 		input->Queue=input->Queue->next;
 	}
 	else
-	{	for(cur=input->Queue;((cur->message_type!=SEND_LOCK_RELEASE || input->Queue->message_type== LOCK_RELEASE)&& cur->content->ID!=ID) && cur; cur=cur->next)
+	{	for(cur=input->Queue;cur; cur=cur->next)
+		{	if((cur->message_type==SEND_LOCK_RELEASE || cur->message_type== LOCK_RELEASE) && cur->content->ID==ID)	
+				break; 
 			prev=cur;
+		}
 		if(cur)
 		{	prev->next=cur->next;
 			trash=cur;
@@ -168,12 +174,51 @@ int remove_lock_release_notice(node *input,int ID)
 	return 0; 
 }
 
+//Find a pending lock set query to a certain value and get rid of it
+//since a set packet will be added again. 
+int remove_lock_set(node *input,int ID)
+{	message *trash, *cur, *prev; 
+	trash=NULL; 
+	cur=NULL;
+	prev=NULL; 
+	//printf("Removing %i %i %i from %i\n",remove->content->ID,remove->content->owner, remove->message_type, input->ID);
+	cur=input->Queue;
+	prev=input->Queue;
+	if(input->Queue->content->ID == ID &&(input->Queue->message_type==SEND_LOCK_SET)) //head of list
+	{	trash=input->Queue;
+		input->Queue=input->Queue->next;
+	}
+	else
+	{	for(cur=input->Queue;cur; cur=cur->next)
+		{	if((cur->message_type==SEND_LOCK_SET) && cur->content->ID==ID)	
+				break; 
+			prev=cur;
+		}
+		if(cur)
+		{	prev->next=cur->next;
+			trash=cur;
+		}
+	}
+	if(trash)
+		free(trash);
+	return 0; 
+}
+
+
 //Print out the contents of a node's queue
-void print_queue(node *input)
-{	message *cur; 
-	for(cur=input->Queue; cur; cur=cur->next) 
-		printf("%5d \t %5d \n", cur->content->ID, cur->message_type);
-	
+void print_queue(node *input,int quantity)
+{	int i; 
+	message *cur; 
+	if(!quantity && input->Queue)
+	{	for(cur=input->Queue; cur; cur=cur->next) 
+			printf("%5d \t %5d \n", cur->content->ID, cur->message_type);
+	}
+	else
+	{	if(input->Queue)
+		{	for(i=0,cur=input->Queue; i<quantity && cur; i++,cur=cur->next) 
+				printf("%5d \t %5d \n", cur->content->ID, cur->message_type);
+		}
+	}
 	return;
 }
 
@@ -182,10 +227,6 @@ int make_message(message *input,int sender, int type, data *stuff, message *next
 {	//input=malloc(sizeof(message));
 	if(!input)
 		return -1;
-	if(type>4 || type<0)
-	{	printf("Error!");
-		return -1;
-	}
 	input->sender=sender; 
 	input->message_type=type;
 	input->content=stuff;

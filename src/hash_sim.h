@@ -84,7 +84,7 @@ typedef struct node_{
 int make_node(node *, int, message *);
 int add_query(node *, message *);
 int remove_query(node *, message *);
-void print_queue(node *);
+void print_queue(node *,int);
 int build_node_arr(node *, int, int, int, float, data *);
 
 int make_message(message *, int,int, data *, message *);
