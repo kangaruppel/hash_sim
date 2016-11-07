@@ -8,13 +8,15 @@ int make_lock(lock *new_lock,int ID, int owner, int rep_factor, int *copyholders
 	new_lock->owner=owner;
 	new_lock->holder=-1;
 	new_lock->version=-1; 
-	new_lock->stakeholders_acked=malloc(sizeof(int)*rep_factor);
-	new_lock->stakeholders_released=malloc(sizeof(int)*rep_factor);
+	//new_lock->stakeholders_acked=malloc(sizeof(int)*rep_factor);
+	//new_lock->stakeholders_released=malloc(sizeof(int)*rep_factor);
+	new_lock->stakeholders_locked=malloc(sizeof(int)*rep_factor);
 	new_lock->stakeholder_versions=malloc(sizeof(int)*rep_factor); 
 	new_lock->stakeholders=copyholders;
 	for(i=0;i<rep_factor;i++)
-	{	new_lock->stakeholders_acked[i]=0;
-		new_lock->stakeholders_released[i]=1;
+	{	new_lock->stakeholders_locked[i]=0;
+		//new_lock->stakeholders_acked[i]=0;
+		//new_lock->stakeholders_released[i]=1;
 		new_lock->stakeholder_versions[i]=-1;
 	}
 	if(!new_lock->stakeholders)
@@ -24,8 +26,9 @@ int make_lock(lock *new_lock,int ID, int owner, int rep_factor, int *copyholders
 
 int free_lock(lock *lock_in)
 {	free(lock_in->stakeholders);
-	free(lock_in->stakeholders_acked);
-	free(lock_in->stakeholders_released);
+	//free(lock_in->stakeholders_acked);
+	//free(lock_in->stakeholders_released);
+	free(lock_in->stakeholders_locked);
 	free(lock_in->stakeholder_versions);
 	free(lock_in); 
 	return 0; 
@@ -45,6 +48,8 @@ int make_node(node *new_node, int ID, message *requests)
 	new_node->Misses=0;
 	new_node->Acks=0;
 	new_node->Total=0;
+	new_node->lock_acks=malloc(sizeof(int));
+	new_node->release_acks=malloc(sizeof(int));
 	new_node->Active_writes=NULL;
 	return 0; 
 }
@@ -52,6 +57,8 @@ int make_node(node *new_node, int ID, message *requests)
 int free_node(node *node_in)
 {	message *cur, *prev; 
 	write *cur2, *prev2;
+	free(node_in->lock_acks);
+	free(node_in->release_acks);
 	prev=NULL;
 	for(cur=node_in->Queue;cur;cur=cur->next)
 	{	if(prev)
@@ -154,6 +161,8 @@ int remove_lock_release_notice(node *input,int ID)
 	//printf("Removing %i %i %i from %i\n",remove->content->ID,remove->content->owner, remove->message_type, input->ID);
 	cur=input->Queue;
 	prev=input->Queue;
+	if(!input->Queue)
+		return 0; 
 	if(input->Queue->content->ID == ID &&(input->Queue->message_type== SEND_LOCK_RELEASE || input->Queue->message_type== LOCK_RELEASE)) //head of list
 	{	trash=input->Queue;
 		input->Queue=input->Queue->next;
