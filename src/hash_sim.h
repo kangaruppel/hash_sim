@@ -30,8 +30,9 @@ typedef struct lock_{
 	int version;
 	int *stakeholder_versions;
 	int *stakeholders;
-	int *stakeholders_acked;
-	int *stakeholders_released;
+	int *stakeholders_locked; 
+	//int *stakeholders_acked;
+	//int *stakeholders_released;
 }lock;
 
 typedef struct data_{
@@ -78,6 +79,8 @@ typedef struct node_{
 	int Misses;
 	int Acks;
 	int Total;
+	int *lock_acks;
+	int *release_acks; 
 	write *Active_writes;
 }node;
 

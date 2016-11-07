@@ -48,8 +48,8 @@ int make_node(node *new_node, int ID, message *requests)
 	new_node->Misses=0;
 	new_node->Acks=0;
 	new_node->Total=0;
-	new_node->lock_acks=malloc(sizeof(int));
-	new_node->release_acks=malloc(sizeof(int));
+	new_node->lock_acks=malloc(sizeof(int ));
+	new_node->release_acks=malloc(sizeof(int ));
 	new_node->Active_writes=NULL;
 	return 0; 
 }
@@ -230,6 +230,20 @@ void print_queue(node *input,int quantity)
 	}
 	return;
 }
+
+void print_all_queues(node *nodes, int quantity)
+{	 int i; 
+	for(i=0;i<25;i++)
+	{	printf("\n%i\n",i);
+		print_queue(nodes+i,quantity);
+	
+	}
+	return; 
+}
+	
+	
+	
+
 
 //Initialize a message
 int make_message(message *input,int sender, int type, data *stuff, message *next)

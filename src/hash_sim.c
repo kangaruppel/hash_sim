@@ -25,6 +25,8 @@ int build_node_arr(node *input, int num_nodes, int namespace_size, int num_reque
 				make_message(lock_message,i,LOCK_REQ,stuff,NULL);
 				add_query_special(input+i,lock_message,NULL, 0,entry);
 			}
+			//(input+i)->lock_acks=malloc(sizeof(int *)*(data_arr->rep_factor*namespace_size/num_nodes)); //fix this later to handle different rep factors per data
+			//(input+i)->release_acks=malloc(sizeof(int *)*(data_arr->rep_factor*namespace_size/num_nodes));
 		}//for(cur=(input+i)->Queue;cur;cur=cur->next)
 		//	printf("%5d \t %5d \t %5d \t \n", cur->content->ID, cur->content->owner, cur->message_type);		
 	}
@@ -318,8 +320,10 @@ float read_off_queue(int j, data *data_arr, node *nodes, int *on_row, double  gl
 	//have to deal with the fact that some node is trying to get at locked data. 
 	i=is_stakeholder(cur_lock,j);
 	
-	//if(cur_lock->ID==5 && packet->message_type>4)
-	//	printf("Here we go!\n");
+	if(j==21 && packet->message_type==GRANTED)
+		printf("Here we go!\n");
+	if(cur_lock->ID==10)
+		k++; 
 	if(i>-1 && cur_lock->holder!=packet->sender && (packet->message_type==WRITE || packet->message_type==READ || packet->message_type==SEND_UPDATES) && cur_lock->stakeholders_locked[i]) //for now we're not doing any dynamic reordering, so this just blocks...
 	{	time=1; //TODO: change if we're doing something other than blocking with these
 		if(cur_lock->holder==-1 && cur_lock->stakeholders_locked[0])
@@ -374,7 +378,7 @@ float read_off_queue(int j, data *data_arr, node *nodes, int *on_row, double  gl
 								continue;
 							}
 							new_packet=malloc(sizeof(message));
-							make_message(new_packet,j, UPDATE,packet->content,NULL); //notify of update
+							make_message(new_packet,packet->sender, UPDATE,packet->content,NULL); //notify of update
 							add_query(nodes+copyholders[i],new_packet);				
 						}
 						
@@ -389,7 +393,7 @@ float read_off_queue(int j, data *data_arr, node *nodes, int *on_row, double  gl
 				//sum_valid=0;
 				if(sum_valid<rep_factor) //Add send update packet
 				{	new_packet=malloc(sizeof(message));
-					make_message(new_packet,j,SEND_UPDATES,packet->content,NULL); 
+					make_message(new_packet,packet->sender,SEND_UPDATES,packet->content,NULL); 
 					add_query(nodes+j,new_packet);
 					if((nodes+j)->Active_writes==0)
 						printf("Womp... Error\n");
@@ -457,7 +461,7 @@ float read_off_queue(int j, data *data_arr, node *nodes, int *on_row, double  gl
 				time=1;
 				flag=0;
 				for(i=0;i<rep_factor;i++) //check for any copyholders that are on with released locks on the data. 
-				{	if(on_row[copyholders[i]] && !cur_lock->stakeholders_locked[i]) //TODO: randomize this too
+				{	if(on_row[copyholders[i]] && (!cur_lock->stakeholders_locked[i] || j==cur_lock->holder)) //TODO: randomize this too
 					{	new_packet=malloc(sizeof(message));
 						make_message(new_packet,j,READ_ACK,packet->content,NULL); //notify of update
 						add_query(nodes+copyholders[i],new_packet);
@@ -562,8 +566,9 @@ float read_off_queue(int j, data *data_arr, node *nodes, int *on_row, double  gl
 					return 1;
 				}
 				
-				if(on_row[owner])
-				{	new_packet=malloc(sizeof(message));
+				if(on_row[owner] /*&& (!(nodes+owner)->Queue || (nodes+owner)->Queue->message_type< 5 || (nodes+owner)->Queue->content->ID==cur_lock->ID)*/) //just added... sooo kludgy!!
+				{	
+					new_packet=malloc(sizeof(message));
 					make_message(new_packet,j,LOCK_REQ,packet->content,NULL); //need to throw 5 packet on there!!
 					add_query(nodes+owner,new_packet); //I shouldn't be leaving "owner" here b/c it's not strictly correct...
 					(nodes+j)->Hits+=1;
@@ -769,7 +774,7 @@ float read_off_queue(int j, data *data_arr, node *nodes, int *on_row, double  gl
 				flag=0; 
 				time=1;
 				for(i=0;i<cur_lock->num_stakeholders;i++)
-				{	if(on_row[cur_lock->stakeholders[i]]==1) //some copyholder is on, TODO: randomize this!!
+				{	if(on_row[cur_lock->stakeholders[i]]==1 /*&& (!(nodes+cur_lock->stakeholders[i])->Queue || (nodes+cur_lock->stakeholders[i])->Queue->message_type<5 || (nodes+cur_lock->stakeholders[i])->Queue->content->ID==cur_lock->ID)*/) //some copyholder is on, TODO: randomize this!!
 					{	new_packet=malloc(sizeof(message));
 						make_message(new_packet,j,LOCK_RELEASE,packet->content,NULL); //need to throw 0 packet on there!!
 						add_query(nodes+cur_lock->stakeholders[i],new_packet); //I shouldn't be leaving "owner" here b/c it's not strictly correct...
