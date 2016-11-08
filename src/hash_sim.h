@@ -19,7 +19,7 @@
 #define SEND_LOCK_SET 10
 #define LOCK_RELEASE 11
 #define SEND_LOCK_RELEASE 12
-#define LOCK_RELEASE_ACK 13
+#define LOCK_RELEASE_ACK 13 
 
 typedef struct lock_{
 	int locked;
@@ -31,8 +31,8 @@ typedef struct lock_{
 	int *stakeholder_versions;
 	int *stakeholders;
 	int *stakeholders_locked; 
-	//int *stakeholders_acked;
-	//int *stakeholders_released;
+	int *stakeholders_set_acked;
+	int *stakeholders_release_acked;
 }lock;
 
 typedef struct data_{
@@ -79,8 +79,8 @@ typedef struct node_{
 	int Misses;
 	int Acks;
 	int Total;
-	int *lock_acks;
-	int *release_acks; 
+	//int *lock_acks;
+	//int *release_acks; 
 	write *Active_writes;
 }node;
 
