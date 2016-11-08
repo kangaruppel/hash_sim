@@ -68,7 +68,7 @@ int free_node(node *node_in)
 	prev2=NULL;
 	for(cur2=node_in->Active_writes;cur2;cur2=cur2->next)
 	{	if(prev2)
-			free(prev2);
+			free_write(prev2);
 		prev2=cur2;
 	}
 	free(prev2);
@@ -304,7 +304,8 @@ int free_data(data *data_in)
 {	free(data_in->copyholders);
 	free(data_in->valid_copies);
 	free(data_in->invalid_time_start);
-	free(data_in->mod_times);
+	if(data_in->mod_times)
+		free(data_in->mod_times);
 	free(data_in->on_while_invalid_cnt);
 	free(data_in->time_on_and_invalid);
 	free(data_in->invalidated_cnt);
@@ -414,7 +415,13 @@ int remove_write(node *input,write *remove)
 		trash=cur;
 	}
 
-	free(trash);
+	free_write(trash);
+	return 0; 
+}
+
+int free_write(write *input)
+{	free(input->copies_acked);
+	free(input);
 	return 0; 
 }
 

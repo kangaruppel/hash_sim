@@ -285,6 +285,7 @@ long process_requests(int **on_mat,node *nodes, data *data_arr, int num_nodes, i
 	////	printf("%ld\n",stale_vector[i]);
 	printf("\n");
 	//fclose(output_file);
+	free(on_row);
 	free(avail_row);
 	free(stale_vector);
 	free(stale_timelog);
@@ -320,14 +321,16 @@ float read_off_queue(int j, data *data_arr, node *nodes, int *on_row, double  gl
 	//have to deal with the fact that some node is trying to get at locked data. 
 	i=is_stakeholder(cur_lock,j);
 	
-	if(j==21 && packet->message_type==GRANTED)
-		printf("Here we go!\n");
-	if(cur_lock->ID==48 && packet->message_type>4)
-		k++; 
+	//if(j==21 && packet->message_type==GRANTED)
+	//	printf("Here we go!\n");
+	//if(cur_lock->ID==48 && packet->message_type>4)
+	//	k++; 
 	if(i>-1 && cur_lock->holder!=packet->sender && (packet->message_type==WRITE || packet->message_type==READ || packet->message_type==SEND_UPDATES) && cur_lock->stakeholders_locked[i]) //for now we're not doing any dynamic reordering, so this just blocks...
 	{	time=1; //TODO: change if we're doing something other than blocking with these
 		if(cur_lock->holder==-1 && cur_lock->stakeholders_locked[0])
 			printf("Why??????????\n");
+		free(avail_row);
+		free(copyholders);
 		return time;
 	}
 	switch(packet->message_type)

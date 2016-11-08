@@ -153,8 +153,9 @@ int main(int argc, char *argv[])
 	printf("Reads of invalid data: %i\n",invalid_accesses);
 	fprintf(STAT_OUTPUT_FILE,"Time to finish | Hits | Misses | Invalid Access | Peak Staleness\n %14d %5d %7d %8d %8.2f",time_out, hits, misses, invalid_accesses, peak_staleness);
 	
-	
+//	fclose(STALE_OUTPUT_FILE);
 	fclose(STAT_OUTPUT_FILE);
+	fclose(on_mat_file);
 	/*rint_queue(node_arr+3);
 	printf("\n");
 	remove_query(node_arr+3,(node_arr+2)->Queue->next->next);
@@ -162,17 +163,17 @@ int main(int argc, char *argv[])
 	for(i=0;i<time_outsteps;i++)
 		free(on_mat[i]);
 	free(on_mat);
-	for(i=0;i<namespace_size;i++)
-	{
-		free_data(data_arr+i);
-	}
-	free(data_arr);
 	for(i=0;i<num_nodes;i++)
 	{
 		free_node(node_arr+i);
 	}
 	free(node_arr);
-	fclose(on_mat_file);
+	for(i=0;i<namespace_size;i++)
+	{
+		free_data(data_arr+i);
+	}
+	free(data_arr);
+	
 	return 0; 
 }
 
