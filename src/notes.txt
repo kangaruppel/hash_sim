@@ -1,22 +1,30 @@
 Protocol for Synchronization: 
 
 All Nodes: 
-	Must check for lock on all data before processing every time
-	Should be part of normal local instruction, just can't bypass
-	data if it turns out it's locked (the time was already spent
+	Must check for lock on all local data before processing every time.
+	Note: if the data is coming from a different node, the requesting node
+	has no idea about the status of a lock, so it's up to the answering node
+	to deny the request if the data is locked. For the record, that check does
+	happen for reads and writes when the requesting node is looking for a node
+	to ask for a piece of data, but that's for programming convenience, and the 
+	end result is the same. 
+	The important thing is that this check has to take time- the data can't just 
+	be magically bypassed if it turns out it's locked (the time was already spent
 	decoding it and such).
 	
 	
 Lock Requestor: 
-	Asks any owner of "x" for a lock
-	Waits for reply...
+	Asks the owner of "x" for a lock
+	Waits for reply..
 		Will get: 
 			"granted" --> lock is ready 
-			"pending" --> still waiting for acks from copyholdersor 
+			"pending" --> still waiting for acks from copyholders 
 			"busy"    --> data is already locked
-	Tells any copyholder that the lock is released 
-	(In future, might be worth it to be in charge of telling all copyholders, 
-	depends how hotspots tend to form, around requests or data)
+	Tells the owner that the lock is released (Right now this happens immediately after getting "granted")
+	(In future, it might be worth it to let any copyholder initiate the lock release, 
+	for this implementation it didn't happen. It also may be worth looking into letting
+	the lock holder be in charge of telling all the copyholders that the data is free...
+	It depends how hotspots tend to form: around requests or data)
 	
 Lock Owner: 
 	When request recieved, check if "x" is already locked
@@ -24,14 +32,19 @@ Lock Owner:
 			return "busy"
 		else 
 			return "pending"
+			Make the requesting node the lock holder, don't let any other node
+			attempt lock the data until this node releases the lock. 
 			Go try to lock all of the copyholders
 				Once all copyholders "ack", 
-					return "granted"
+					Tell the holder it's "granted"
+	When release is received, immediately set the lock holder to null
+		Start telling all of the copyholders that the data is released. 
+		If another node comes along and wants to lock the data, let it, stop the release operation though
 
-Copyholder who hears release:
-	Go tell other copies and owner about release (this is blocking... sort of)
-	Serve requests on "x"
-	If lock notification comes in on "x", stop trying to release it. 
+Copyholder who hears set:
+	Clear any pending release requests.
+	Make sure that the command comes from the lock holder (via the data owner).
+	If there are pending updates to that data, respond with that info and determine whether or not to squash those updates. <-- Still not implemented..
 	
 	
 	
@@ -40,14 +53,11 @@ Notes:
 	gets granted. 
 		The response messages from the lock request CAN'T be inferred by an oracle, the consistency
 	policies will process them. 
-		The emphasis is on the requestor to do something productive with the rejected requests for
-	a lock, the lock owner won't start continuously sending messages to the requestor until it actually
-	grants that lock. 
 		The whole simulator is built on a static input of on/off data, meaning that energy management policies, 
 	such as idling while waiting for lock replies, etc, are going to be lost... so it goes. 
 		Assume that when a node receives a lock notification, if it is updating the data getting locked, it will 
 	send a notice back to the locking node with the updated data. This prevents the possibility of multiple data 
-	versions floating around when data is locked. 
+	versions floating around when data is locked. <--This still needs to be implemented though!!
 	
 Optimizations: 
 		All nodes in listening range could forward the lock and release messages a couple of 
@@ -56,7 +66,7 @@ Optimizations:
 	optimize energy usage, which will affect probability that a node is on to hear a particular response. 
 	
 	
-Motivation for Single Lock Owner, Multiple Lock Releasors: 
+Motivation for Single Lock Owner, Multiple Lock Releasors: (though at the moment it's only a Single Lock Releasor policy)
 
 Single Lock Owner-
 Assume nodes 0,2,3,4 are copyholders of "x", 1 and 5 are not, any copyholder can take up the lock request.
