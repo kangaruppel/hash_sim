@@ -1,4 +1,7 @@
+-----------------------------------------------------------------------------------------------------------------------------
 Protocol for Synchronization: 
+-----------------------------------------------------------------------------------------------------------------------------
+
 
 All Nodes: 
 	Must check for lock on all local data before processing every time.
@@ -85,3 +88,16 @@ Whole system waits until 0 comes up and the same time as 1 to propogate the mess
 2,3,4 unlock that data
 2 continues propogating the message until 0 hears. 
 	If 0 gets another request for a lock on "x", it will squash 2's release attempts. 
+	
+----------------------------------------------------------------------------------------------------------------------------------	
+Protocol for Writes
+----------------------------------------------------------------------------------------------------------------------------------
+
+To keep track of the versions of different writes, every node keeps a list of active writes (i.e. writes that haven't finished
+propogating updates.) Each write keeps track of the key it pertains to, its version number(more about that later) and the copies
+that have and haven't acknowledged the update.
+To create a write, in addition to initializing all of the acked copies, the invalid times need to be set up. Every time a write happens, 
+all of the copies go invalid and additional record of modifying the data is made. The version that a new write uses is based on the most 
+recent write version that the node has seen... so things go South really quickly when multiple writers come into the picture!
+When a write is added to the list of writes, it runs through the existing list and removes any active writes to the same data and pulls
+update messages off of the node's queue. (See the "add_write" funnction).
