@@ -270,6 +270,8 @@ int make_data(data *input, int ID, int num_nodes, int rep_factor)
 	input->rep_factor=rep_factor;
 	input->invalid_accesses=0;
 	input->num_writers=0;
+	input->risk_window_hits=0;
+	input->total_reads=0; 
 	input->copyholders=copyfinder(num_nodes,rep_factor,input->owner);
 	input->mod_times=malloc(sizeof(int));
 	input->valid_copies=malloc(sizeof(int)*rep_factor);

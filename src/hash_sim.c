@@ -91,12 +91,16 @@ float staleness_checker(data *data_arr, int namespace_size, int global_time, int
 	{	total_var_copies+=(data_arr+i)->rep_factor;
 		stale_copies=0;
 		for(j=0;j<(data_arr+i)->rep_factor;j++)//roll through all the copies
-		{	valid_state=1; 
+		{	//if(!MULTI_WRITER && !j)//smh... such a kludge
+			//	continue; 
+			valid_state=1; 
 			last_valid_state=(data_arr+i)->last_valid_state[j];
 			last_power_state=(data_arr+i)->last_onoff_state[j];
 			power_state=on_row[(data_arr+i)->copyholders[j]]; //check if copyholder is on or off
 			if((data_arr+i)->valid_copies[j]!=(data_arr+i)->num_writers) //check if copy is stale
 			{	stale_copies++;
+				//if(j==0)
+				//	printf("but why?\n");
 				valid_state=0;
 			}
 			if(!valid_state && last_valid_state)//If newly invalid, inc invalidated_cnt
@@ -210,7 +214,7 @@ long process_requests(int **on_mat,node *nodes, data *data_arr, int num_nodes, i
 			{	//printf("Checking node %i\n",j);
 				on=1;
 				num_tried++;
-				if(avail_row[j]) 
+				if(on_row[j]) 
 				{	total_time=0; 
 					while(1)
 					{	time_out=read_off_queue(j,data_arr,nodes,avail_row,time_to_finish,total_time, num_nodes);
@@ -323,8 +327,10 @@ float read_off_queue(int j, data *data_arr, node *nodes, int *on_row, double  gl
 	
 	//if(j==21 && packet->message_type==GRANTED)
 	//	printf("Here we go!\n");
-	//if(cur_lock->ID==48 && packet->message_type>4)
-	//	k++; 
+	if(cur_lock->ID==43 && j==18 && global_time>13450000)
+		k++; 
+	//if(cur_lock->ID==43 && cur_lock->holder==-1 && cur_lock->stakeholders_locked[3] && cur_lock->stakeholders_release_acked[3])
+	//	printf("Wait, what? Why? How? \n"); 
 	if(i>-1 && cur_lock->holder!=packet->sender && (packet->message_type==WRITE || packet->message_type==READ || packet->message_type==SEND_UPDATES) && cur_lock->stakeholders_locked[i]) //for now we're not doing any dynamic reordering, so this just blocks...
 	{	time=1; //TODO: change if we're doing something other than blocking with these
 		if(cur_lock->holder==-1 && cur_lock->stakeholders_locked[0])
@@ -373,7 +379,7 @@ float read_off_queue(int j, data *data_arr, node *nodes, int *on_row, double  gl
 				if(flag) //if sending off node 
 				{	//check in with ALL the copyholders, but ignore the ones who already ack'd
 					for(i=0;i<rep_factor;i++) //TODO: package into a function!!!
-					{	if(on_row[copyholders[i]] && !cur_write->copies_acked[i]) //one of the copies is on and it hasn't acked
+					{	if((on_row[copyholders[i]] || copyholders[i]==j || copyholders[i]==packet->sender) && !cur_write->copies_acked[i]) //one of the copies is on and it hasn't acked
 						{	cur_write->copies_acked[i]=1;
 							on_row[copyholders[i]]=0;
 							if(copyholders[i]==j) //skip the ack message since it's local
@@ -483,7 +489,14 @@ float read_off_queue(int j, data *data_arr, node *nodes, int *on_row, double  gl
 			}
 			//since we broke both of the prior for loops and haven't touched i since... 
 			if(flag)
-			{	if((data_arr+ID)->valid_copies[i]!=(data_arr+ID)->num_writers)	
+			{	for(k=0;k<rep_factor;k++)
+				{	if((data_arr+ID)->valid_copies[k]!=(data_arr+ID)->num_writers)
+					{	(data_arr+ID)->risk_window_hits++; 
+						break; 
+					}
+				}
+				(data_arr+ID)->total_reads++; 
+				if((data_arr+ID)->valid_copies[i]!=(data_arr+ID)->num_writers)	
 					(data_arr+ID)->invalid_accesses++;
 			}
 			break;
@@ -603,7 +616,7 @@ float read_off_queue(int j, data *data_arr, node *nodes, int *on_row, double  gl
 					else
 						remove_lock_set(nodes+j,cur_lock->ID); //to get rid of old set packets hanging around
 					for(i=0;i<cur_lock->num_stakeholders;i++) //check if any of the stakeholders is on
-					{	if(on_row[cur_lock->stakeholders[i]] && !cur_lock->stakeholders_set_acked[i]) //one of the stakeholders is on and it hasn't acked
+					{	if((on_row[cur_lock->stakeholders[i]] || cur_lock->stakeholders[i]==j)&& !cur_lock->stakeholders_set_acked[i]) //one of the stakeholders is on and it hasn't acked
 						{	cur_lock->stakeholders_set_acked[i]=1;
 							//cur_lock->stakeholders_locked[i]=1; //moved to lock_set_ack
 							on_row[cur_lock->stakeholders[i]]=0;
@@ -823,7 +836,7 @@ float read_off_queue(int j, data *data_arr, node *nodes, int *on_row, double  gl
 
 				//Run through stakeholders and try to tell them it's released.
 				for(i=0;i<cur_lock->num_stakeholders;i++) //check if any of the stakeholders is on
-				{	if(on_row[cur_lock->stakeholders[i]] && !cur_lock->stakeholders_release_acked[i]) //one of the stakeholders is on and it hasn't been released
+				{	if((on_row[cur_lock->stakeholders[i]] || cur_lock->stakeholders[i]==j) && !cur_lock->stakeholders_release_acked[i]) //one of the stakeholders is on and it hasn't been released
 					{	on_row[cur_lock->stakeholders[i]]=0;
 						cur_lock->stakeholders_release_acked[i]=1;
 						if(cur_lock->stakeholders[i]==j)//skip ack message if local

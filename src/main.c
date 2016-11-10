@@ -142,7 +142,7 @@ int main(int argc, char *argv[])
 	fprintf(STAT_OUTPUT_FILE,"Copy # | Invalidated Cnt | Avg Time Invalid | Avg Time Invalid & On \n");
 	for(i=0;i<namespace_size;i++)
 	{	invalid_accesses+=(data_arr+i)->invalid_accesses;
-		printf("----------Variable %i, Written %i Times, Invalid Accesses %i----------\n",i, (data_arr+i)->num_writers, (data_arr+i)->invalid_accesses);
+		printf("------Variable %i, Written %i Times, Invalid Accesses %i, Risk Window Hits %i, Total Reads %i------\n",i, (data_arr+i)->num_writers, (data_arr+i)->invalid_accesses, (data_arr+i)->risk_window_hits, (data_arr+i)->total_reads );
 		for(j=0;j<(data_arr+i)->rep_factor;j++)
 		{	printf("copy %i: Inval %i Times, Avg Time Inval: %.2f Avg Time Inval & On: %.2f \n",j,(data_arr+i)->invalidated_cnt[j],(data_arr+i)->avg_time_invalid[j],(data_arr+i)->avg_time_on_while_invalid[j]); 
 			fprintf(STAT_OUTPUT_FILE,"%7i %16i %17.2f %22.2f\n",j,(data_arr+i)->invalidated_cnt[j],(data_arr+i)->avg_time_invalid[j],(data_arr+i)->avg_time_on_while_invalid[j]); 

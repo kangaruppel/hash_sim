@@ -41,6 +41,8 @@ typedef struct data_{
 	int rep_factor;
 	int invalid_accesses;
 	int num_writers;
+	int risk_window_hits;
+	int total_reads; 
 	int *copyholders;
 	int *mod_times;
 	int *valid_copies;
