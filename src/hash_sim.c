@@ -85,29 +85,34 @@ int all_queues_empty(node *nodes,int num_nodes)
 
 float staleness_checker(data *data_arr, int namespace_size, int global_time, int *on_row)
 {	int total_var_copies=0, total_stale_copies=0, time_invalid=0;
-	int i,j,stale_copies,stale_time, power_state,last_power_state,last_valid_state, valid_state=1;
+	int i,j,k,stale_copies,stale_time, power_state,last_power_state,last_valid_state, valid_state=1;
 	float staleness;
 	for(i=0;i<namespace_size;i++)
 	{	total_var_copies+=(data_arr+i)->rep_factor;
 		stale_copies=0;
+		if((data_arr+i)->num_writes_in_timestep > 1)
+		{	for(j=0;j<(data_arr+i)->rep_factor;j++)
+				(data_arr+i)->valid_copies[j]=0; //invalidate all the copies...	
+		}
 		for(j=0;j<(data_arr+i)->rep_factor;j++)//roll through all the copies
-		{	//if(!MULTI_WRITER && !j)//smh... such a kludge
-			//	continue; 
+		{	 
 			valid_state=1; 
 			last_valid_state=(data_arr+i)->last_valid_state[j];
 			last_power_state=(data_arr+i)->last_onoff_state[j];
 			power_state=on_row[(data_arr+i)->copyholders[j]]; //check if copyholder is on or off
-			if((data_arr+i)->valid_copies[j]!=(data_arr+i)->num_writers) //check if copy is stale
+			if(!(data_arr+i)->valid_copies[j])//copy_versions[j]!=(data_arr+i)->num_writers) //check if copy is stale
 			{	stale_copies++;
 				//if(j==0)
 				//	printf("but why?\n");
 				valid_state=0;
 			}
+			if(global_time>1076050)
+				k++;
 			if(!valid_state && last_valid_state)//If newly invalid, inc invalidated_cnt
 				(data_arr+i)->invalidated_cnt[j]++;
 			if(!valid_state && !last_power_state && power_state)//if invalid and going from off to on TODO: use this to profile on times while invalid 
 				(data_arr+i)->on_while_invalid_cnt[j]++; 
-			if(!valid_state && power_state)//If on and invalid
+			if(!valid_state && power_state)//If on and invalid 
 				(data_arr+i)->time_on_and_invalid[j]++;
 			if(valid_state && !last_valid_state && (data_arr+i)->invalid_time_start[j])//If newly valid, run through and update avgs
 			{	time_invalid=global_time-(data_arr+i)->invalid_time_start[j]; //TODO: make sure invalid_time_start always > 0 
@@ -119,6 +124,7 @@ float staleness_checker(data *data_arr, int namespace_size, int global_time, int
 			(data_arr+i)->last_valid_state[j]=valid_state; 
 		}
 		total_stale_copies+=stale_copies;
+		(data_arr+i)->num_writes_in_timestep=0; //clean out for next time step. 
 		//stale_vector[i]+=stale_time;
 		//if(stale_vector[i]>1)
 			//	printf("out of date!!\n");
@@ -201,6 +207,7 @@ long process_requests(int **on_mat,node *nodes, data *data_arr, int num_nodes, i
 		//printf("\n");
 		on=0;
 		//printf("\nStart a j:\n");
+
 		while(num_tried<num_on)
 		{	j=nodes_on[num_tried]; //pick a random start point, also shouldn't have to worry about cleaning out this array every time...
 			//total_time=0;
@@ -232,6 +239,7 @@ long process_requests(int **on_mat,node *nodes, data *data_arr, int num_nodes, i
 				}
 			}
 		}
+
 		//if(num_on>0)
 		//	printf("Tried all nodes\n");
 	/*	if(on)
@@ -251,6 +259,8 @@ long process_requests(int **on_mat,node *nodes, data *data_arr, int num_nodes, i
 			on=0;
 		}*/
 		done=all_queues_empty(nodes,num_nodes);
+		if(done)
+			k++;
 		intermed=staleness_checker(data_arr,namespace_size,time_to_finish, on_row); 
 		if(intermed> *peak_staleness)
 			*peak_staleness=intermed;
@@ -354,7 +364,7 @@ float read_off_queue(int j, data *data_arr, node *nodes, int *on_row, double  gl
 			if(writer)
 			{	time=.01;
 				//Do set up for a new write, includes incrementing hits
-				new_write_monitoring(j, nodes,packet->content, global_time);
+				new_write_monitoring(j, packet->sender, nodes,packet->content, global_time);
 				if((nodes+j)->Active_writes==0)
 					printf("Look, ya screwed up here too!\n");
 				//check if there's time to send the update
@@ -364,7 +374,7 @@ float read_off_queue(int j, data *data_arr, node *nodes, int *on_row, double  gl
 				{	if(total_time>0)
 					{	i=is_copyholder(packet->content,j);
 						if(i>-1) //update if it's a local copy so it's not invalid anymore
-							(data_arr+ID)->valid_copies[i]=cur_write->version;
+							(data_arr+ID)->copy_versions[i]=cur_write->version;
 						flag=0; //Don't let updates be sent, immediately throw a "4" packet on the queue. 
 					}
 					else
@@ -383,7 +393,8 @@ float read_off_queue(int j, data *data_arr, node *nodes, int *on_row, double  gl
 						{	cur_write->copies_acked[i]=1;
 							on_row[copyholders[i]]=0;
 							if(copyholders[i]==j) //skip the ack message since it's local
-							{	(data_arr+ID)->valid_copies[i]=cur_write->version;
+							{	(data_arr+ID)->copy_versions[i]=cur_write->version;
+								(data_arr+ID)->valid_copies[i]= (packet->sender==(data_arr+ID)->most_recent_writer);
 								continue;
 							}
 							new_packet=malloc(sizeof(message));
@@ -490,13 +501,13 @@ float read_off_queue(int j, data *data_arr, node *nodes, int *on_row, double  gl
 			//since we broke both of the prior for loops and haven't touched i since... 
 			if(flag)
 			{	for(k=0;k<rep_factor;k++)
-				{	if((data_arr+ID)->valid_copies[k]!=(data_arr+ID)->num_writers)
+				{	if((data_arr+ID)->copy_versions[k]!=(data_arr+ID)->num_writers)
 					{	(data_arr+ID)->risk_window_hits++; 
 						break; 
 					}
 				}
 				(data_arr+ID)->total_reads++; 
-				if((data_arr+ID)->valid_copies[i]!=(data_arr+ID)->num_writers)	
+				if((data_arr+ID)->copy_versions[i]!=(data_arr+ID)->num_writers)	
 					(data_arr+ID)->invalid_accesses++;
 			}
 			break;
@@ -509,9 +520,10 @@ float read_off_queue(int j, data *data_arr, node *nodes, int *on_row, double  gl
 			copy_index=is_copyholder(packet->content,j);
 			copy_index2=is_copyholder(packet->content,packet->sender);
 			if(copy_index>-1)//if j is a copyholder and it's getting updated
-			{	if((data_arr+ID)->valid_copies[copy_index]<(data_arr+ID)->valid_copies[copy_index2] || NEWER_WRITE_NOT_REQ)
-				{	(data_arr+ID)->valid_copies[copy_index]=(data_arr+ID)->valid_copies[copy_index2];
+			{	if((data_arr+ID)->copy_versions[copy_index]<(data_arr+ID)->copy_versions[copy_index2] || NEWER_WRITE_NOT_REQ)
+				{	(data_arr+ID)->copy_versions[copy_index]=(data_arr+ID)->copy_versions[copy_index2];
 				}
+				(data_arr+ID)->valid_copies[copy_index]= (packet->sender==(data_arr+ID)->most_recent_writer);
 			}
 			remove_query(nodes+j,packet);
 			(nodes+j)->Updates++;
@@ -551,14 +563,14 @@ float read_off_queue(int j, data *data_arr, node *nodes, int *on_row, double  gl
 			for(i=0;i<rep_factor;i++)
 			{	if(on_row[copyholders[i]] && !cur_write->copies_acked[i]) //one of the copies is on and it hasn't acked
 				{	cur_write->copies_acked[i]=1;
-					if((data_arr+ID)->valid_copies[i]<cur_write->version) //To ensure that a newer update isn't overwritten. 
-						(data_arr+ID)->valid_copies[i]=cur_write->version;
+					if((data_arr+ID)->copy_versions[i]<cur_write->version) //To ensure that a newer update isn't overwritten. 
+						(data_arr+ID)->copy_versions[i]=cur_write->version;
 					if(copyholders[i]==j) //skip the ack message since it's local
 						continue;	//realistically there's no way the local shouldn't already be ack'd. 
 					new_packet=malloc(sizeof(message));
-					make_message(new_packet,j,UPDATE,packet->content,NULL); //notify of update
+					make_message(new_packet,packet->sender,UPDATE,packet->content,NULL); //notify of update
 					add_query(nodes+copyholders[i],new_packet);
-					on_row[copyholders[i]]=0; 
+					on_row[copyholders[i]]=0;  
 				}	
 			}
 			sum_valid=0;

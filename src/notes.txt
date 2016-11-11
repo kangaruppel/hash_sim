@@ -98,6 +98,10 @@ propogating updates.) Each write keeps track of the key it pertains to, its vers
 that have and haven't acknowledged the update.
 To create a write, in addition to initializing all of the acked copies, the invalid times need to be set up. Every time a write happens, 
 all of the copies go invalid and additional record of modifying the data is made. The version that a new write uses is based on the most 
-recent write version that the node has seen... so things go South really quickly when multiple writers come into the picture!
+recent write version that the node has seen... so things go South really quickly when multiple writers come into the picture! The most
+recent version is tracked in the "UPDATE" stage when a node ack's a consistency update to a variable it holds. It's also important to 
+note that if multiple writes happen in the same time step (which really doesn't happen all that often), both are considered invalid
+because there's no way to determine which is the correct value and which is stale, so for as long as those values are getting propagated
+around, every copy of those variables is counted as stale (take "stale" here to really mean invalid rather than just old).
 When a write is added to the list of writes, it runs through the existing list and removes any active writes to the same data and pulls
 update messages off of the node's queue. (See the "add_write" funnction).

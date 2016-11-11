@@ -272,8 +272,11 @@ int make_data(data *input, int ID, int num_nodes, int rep_factor)
 	input->num_writers=0;
 	input->risk_window_hits=0;
 	input->total_reads=0; 
+	input->num_writes_in_timestep=0; 
+	input->most_recent_writer=-1;
 	input->copyholders=copyfinder(num_nodes,rep_factor,input->owner);
 	input->mod_times=malloc(sizeof(int));
+	input->copy_versions=malloc(sizeof(int)*rep_factor);
 	input->valid_copies=malloc(sizeof(int)*rep_factor);
 	input->invalid_time_start=malloc(sizeof(int)*rep_factor);
 	input->on_while_invalid_cnt = malloc(sizeof(int)*rep_factor);
@@ -284,10 +287,11 @@ int make_data(data *input, int ID, int num_nodes, int rep_factor)
 	input->avg_time_on_while_invalid = malloc(sizeof(float)*rep_factor);
 	input->avg_time_invalid = malloc(sizeof(float)*rep_factor);
 	//input->mode_times=malloc(sizeof(int)*rep_factor);
-	if(!input->copyholders || !input->invalid_time_start || !input->valid_copies )
+	if(!input->copyholders || !input->invalid_time_start || !input->copy_versions )
 		return -1;
 	for(i=0;i<rep_factor;i++)
-	{	input->valid_copies[i]=0;
+	{	input->valid_copies[i]=1; 
+		input->copy_versions[i]=0;
 		input->invalid_time_start[i]=0;
 		input->on_while_invalid_cnt[i]=0;
 		input->time_on_and_invalid[i]=0;
@@ -304,7 +308,7 @@ int make_data(data *input, int ID, int num_nodes, int rep_factor)
 
 int free_data(data *data_in)
 {	free(data_in->copyholders);
-	free(data_in->valid_copies);
+	free(data_in->copy_versions);
 	free(data_in->invalid_time_start);
 	if(data_in->mod_times)
 		free(data_in->mod_times);
@@ -383,10 +387,13 @@ int add_write(node *input,write *new_request)
 	message *cur2,  *temp;
 	if(!new_request)
 		printf("Add write failed!!\n");
-	for(cur=input->Active_writes;cur->ID!=new_request->ID, cur; cur=cur->next);
+	for(cur=input->Active_writes; cur; cur=cur->next)
+	{	if(cur->ID==new_request->ID)
+			break;
+	}
 	if(cur)
 	{	remove_write(input,cur);
-		for(cur2=input->Queue;cur2->next;cur2=temp)
+		for(cur2=input->Queue;cur2/*->next*/;cur2=temp)
 		{	temp=cur2->next;
 			if(cur2->message_type==4 && cur2->content->ID == new_request->ID) //If you find an update order from a stale copy, get that out of there!
 				remove_query(input,cur2);
@@ -429,19 +436,25 @@ int free_write(write *input)
 
 //This function sets up the new write monitoring node... It has j as and index into the 
 //array, 
-int new_write_monitoring(int j, node *nodes, data *content, double global_time)
+int new_write_monitoring(int j,int sender, node *nodes, data *content, double global_time)
 {	int i,index;
 	write *new=malloc(sizeof(write));
 	(nodes+j)->Hits+=1;
 	(nodes+j)->Total+=1;
 	content->num_writers++; //Basically increment the most up-to-date version number
 	index=is_copyholder(content,j); //has to be a copyholder to be writing... 
-	content->valid_copies[index]++; 
+	content->copy_versions[index]++; 
 	for(i=0;i<content->rep_factor;i++)
-		content->invalid_time_start[i]=global_time;
+	{	content->invalid_time_start[i]=global_time;
+		content->valid_copies[i]=0; 
+	}
+	content->num_writes_in_timestep++;
+	if(content->num_writes_in_timestep<2) 
+		content->most_recent_writer=sender;  
+	content->valid_copies[index]=1; //change later if it turns out two writes happen in the same time!!!!! 
 	if(!new)
 		return -1;
-	make_write(new,content->ID, content->valid_copies[index], content->rep_factor);
+	make_write(new,content->ID, content->copy_versions[index], content->rep_factor);
 	add_write(nodes+j, new);
 	content->mod_times=realloc(content->mod_times,sizeof(int)*content->num_writers);
 	content->mod_times[content->num_writers-1]=global_time;
